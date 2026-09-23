@@ -10,7 +10,65 @@ Task → Planner → Executor → Verifier → Final answer
 
 The RL controller comes later. First, we need a clean environment with stable interfaces, logging, reproducible prompts, and tests.
 
-## Why this structure
+## Free local LLM setup
+
+The default backend is **Ollama**, so the project does not require a paid API.
+
+For a 16 GB Apple Silicon Mac, the current default model is
+
+```text
+qwen3:4b-instruct
+```
+
+Install Ollama from its official macOS distribution, start Ollama, then pull the model
+
+```bash
+ollama pull qwen3:4b-instruct
+```
+
+The model download is roughly 2.5 GB. The project uses a 4K context by default to keep memory usage modest.
+
+Create a Python environment and install the project
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+Run the first real local three-agent task
+
+```bash
+python -m heteroagent_rl.cli \
+  --task "Write a Python function that returns the nth Fibonacci number."
+```
+
+No API key is needed for the default Ollama backend.
+
+You can verify the pipeline without loading a real model
+
+```bash
+python -m heteroagent_rl.cli --mock \
+  --task "Write a Python function that returns the nth Fibonacci number."
+```
+
+## Architecture
+
+The current fixed baseline is
+
+```text
+Task
+  ↓
+Planner
+  ↓
+Executor
+  ↓
+Verifier
+  ↓
+Final answer
+```
+
+All three roles currently share the same local model but use different system prompts. This gives us a clean homogeneous baseline before we introduce true model heterogeneity later.
 
 The same agent interface will later be controlled by an RL policy whose actions are
 
@@ -21,37 +79,57 @@ The same agent interface will later be controlled by an RL policy whose actions 
 
 Because the fixed workflow and the learned workflow use the same agent objects, we can compare them fairly.
 
-## Quick start
+## Local configuration
 
-Create a virtual environment and install the package
+The default Ollama endpoint is
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+```text
+http://localhost:11434
 ```
 
-Run the zero-cost mock pipeline
+Override it with
 
 ```bash
-python -m heteroagent_rl.cli --mock \
-  --task "Write a Python function that returns the nth Fibonacci number."
+export HETEROAGENT_OLLAMA_URL="http://localhost:11434"
 ```
 
-Run against an OpenAI-compatible endpoint
+The default context length is 4096 tokens. Override it with
+
+```bash
+export HETEROAGENT_NUM_CTX=8192
+```
+
+or per run
+
+```bash
+python -m heteroagent_rl.cli \
+  --num-ctx 8192 \
+  --task "Solve this problem..."
+```
+
+## Optional paid/OpenAI-compatible backend
+
+The OpenAI client remains optional so we can compare local and hosted inference later. It is not required for the project.
+
+Install it only if you want it
+
+```bash
+pip install -e ".[openai]"
+```
+
+Then set the relevant environment variables and choose the backend explicitly
 
 ```bash
 export HETEROAGENT_API_KEY="..."
 export HETEROAGENT_BASE_URL="https://api.openai.com/v1"
 
 python -m heteroagent_rl.cli \
-  --task "Write a Python function that returns the nth Fibonacci number." \
+  --backend openai \
   --planner-model "YOUR_MODEL" \
   --executor-model "YOUR_MODEL" \
-  --verifier-model "YOUR_MODEL"
+  --verifier-model "YOUR_MODEL" \
+  --task "Solve this problem..."
 ```
-
-The same client works with a local vLLM server because vLLM exposes an OpenAI-compatible API.
 
 ## Phase 1 acceptance criteria
 
@@ -62,15 +140,28 @@ Before moving to RL, the project should be able to
 - record every prompt, response, latency, and token count
 - produce a machine-readable trajectory
 - run without an external API using the mock client
+- run fully locally using Ollama
 - pass unit tests
+
+## Planned heterogeneous setup
+
+Once the environment and evaluator are stable, we will replace the homogeneous baseline with a small heterogeneous team, for example
+
+```text
+Planner    → Qwen general-purpose model
+Executor   → Qwen Coder model
+Verifier   → lightweight Gemma model
+```
+
+The exact model sizes will be chosen to stay within a 16 GB unified-memory Mac and a modest disk budget.
 
 ## Next milestones
 
 ### Phase 1A
-Add a real benchmark adapter for a small coding or reasoning dataset.
+Add a real coding benchmark adapter and executable scoring.
 
 ### Phase 1B
-Add executable tools for the Executor, beginning with sandboxed Python execution.
+Give the Executor a sandboxed Python tool so it can run code, inspect errors, and revise solutions.
 
 ### Phase 1C
 Add an evaluator that records success, total tokens, total calls, latency, and cost.
