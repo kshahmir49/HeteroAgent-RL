@@ -70,7 +70,7 @@ def resolve_backend(requested: str = "auto") -> str:
     )
 
 
-def _docker_command(input_dir: Path, output_dir: Path, benchmark: str) -> list[str]:
+def _docker_command(input_dir: Path, output_dir: Path, benchmark: str | None, mode: str = "evalplus") -> list[str]:
     return [
         "docker",
         "run",
@@ -103,8 +103,9 @@ def _docker_command(input_dir: Path, output_dir: Path, benchmark: str) -> list[s
         EVALPLUS_IMAGE,
         "python",
         "/input/worker.py",
-        "--benchmark",
-        benchmark,
+        "--mode",
+        mode,
+        *(["--benchmark", benchmark] if benchmark else []),
         "--problems",
         "/input/problems.pkl",
         "--samples",
@@ -114,7 +115,7 @@ def _docker_command(input_dir: Path, output_dir: Path, benchmark: str) -> list[s
     ]
 
 
-def _apple_command(input_dir: Path, output_dir: Path, benchmark: str) -> list[str]:
+def _apple_command(input_dir: Path, output_dir: Path, benchmark: str | None, mode: str = "evalplus") -> list[str]:
     return [
         "container",
         "run",
@@ -142,8 +143,9 @@ def _apple_command(input_dir: Path, output_dir: Path, benchmark: str) -> list[st
         APPLE_EVALPLUS_IMAGE,
         "python",
         "/input/worker.py",
-        "--benchmark",
-        benchmark,
+        "--mode",
+        mode,
+        *(["--benchmark", benchmark] if benchmark else []),
         "--problems",
         "/input/problems.pkl",
         "--samples",
@@ -200,9 +202,9 @@ def run_evalplus_sandbox(
             _write_bundle(input_dir, problems, solutions)
 
             if resolved == "docker":
-                command = _docker_command(input_dir, output_dir, benchmark)
+                command = _docker_command(input_dir, output_dir, benchmark, "evalplus")
             else:
-                command = _apple_command(input_dir, output_dir, benchmark)
+                command = _apple_command(input_dir, output_dir, benchmark, "evalplus")
 
             try:
                 result = subprocess.run(
@@ -232,6 +234,59 @@ def run_evalplus_sandbox(
             if not result_path.exists():
                 raise SandboxExecutionError(
                     "Sandbox finished without producing /output/results.json."
+                )
+
+            scored = json.loads(result_path.read_text(encoding="utf-8"))
+
+    return resolved, scored
+
+
+def run_public_examples_sandbox(
+    problems: dict[str, dict[str, Any]],
+    solutions: dict[str, str],
+    *,
+    backend: str = "auto",
+    timeout_s: float = 120.0,
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    """Run only examples visible in the benchmark prompt inside the container."""
+    resolved = resolve_backend(backend)
+
+    with tempfile.TemporaryDirectory(prefix="heteroagent-public-input-") as in_tmp:
+        with tempfile.TemporaryDirectory(prefix="heteroagent-public-output-") as out_tmp:
+            input_dir = Path(in_tmp).resolve()
+            output_dir = Path(out_tmp).resolve()
+            _write_bundle(input_dir, problems, solutions)
+
+            if resolved == "docker":
+                command = _docker_command(input_dir, output_dir, None, "public")
+            else:
+                command = _apple_command(input_dir, output_dir, None, "public")
+
+            try:
+                result = subprocess.run(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=timeout_s,
+                    check=False,
+                    env=os.environ.copy(),
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise SandboxExecutionError(
+                    f"Public-example sandbox exceeded {timeout_s:.0f} seconds."
+                ) from exc
+
+            if result.returncode != 0:
+                detail = result.stderr.strip() or result.stdout.strip() or "No error output."
+                raise SandboxExecutionError(
+                    f"Public-example sandbox failed with exit code {result.returncode}. {detail}"
+                )
+
+            result_path = output_dir / "results.json"
+            if not result_path.exists():
+                raise SandboxExecutionError(
+                    "Public-example sandbox finished without producing results.json."
                 )
 
             scored = json.loads(result_path.read_text(encoding="utf-8"))
