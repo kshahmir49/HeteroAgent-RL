@@ -37,7 +37,7 @@ def test_public_examples_catch_wrong_behavior():
 """,
     }
     solution = """def double(x: int) -> int:
-    return x + 2
+    return x + 1
 """
 
     result = run_public_examples(problem, solution)
