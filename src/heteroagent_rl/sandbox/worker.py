@@ -61,9 +61,10 @@ def run_public_examples(problem: dict, solution: str) -> dict:
         }
 
     globs: dict = {}
-    combined = support_code(problem["prompt"], problem["entry_point"]) + "\n\n" + solution
     try:
-        exec(combined, globs)
+        # The system contract requires a standalone module. Do not inject helpers
+        # or imports from the benchmark prompt here.
+        exec(solution, globs)
     except BaseException as exc:
         return {
             "status": "fail",
