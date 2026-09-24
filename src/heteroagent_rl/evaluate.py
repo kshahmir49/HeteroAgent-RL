@@ -12,6 +12,7 @@ from heteroagent_rl.benchmarks.evalplus_adapter import load_evalplus_problems
 from heteroagent_rl.code_utils import extract_code, parse_verdict
 from heteroagent_rl.clients.mock import MockLLMClient
 from heteroagent_rl.clients.ollama import OllamaClient
+from heteroagent_rl.preflight import preflight_solution
 from heteroagent_rl.sandbox.runner import run_evalplus_sandbox
 from heteroagent_rl.workflow.fixed import FixedWorkflow
 
@@ -116,6 +117,7 @@ def main() -> None:
         result = workflow.run(task.prompt)
         solution = extract_code(result.final_answer)
         verifier_verdict = parse_verdict(result.steps[-1].response)
+        preflight = preflight_solution(solution)
 
         solutions[task.task_id] = solution
         samples.append(
@@ -129,6 +131,7 @@ def main() -> None:
                 "task_id": task.task_id,
                 "entry_point": task.entry_point,
                 "verifier_verdict": verifier_verdict,
+                "preflight": preflight.to_dict(),
                 **result.to_dict(),
             }
         )
@@ -156,6 +159,9 @@ def main() -> None:
         "avg_latency_s": total_latency / len(tasks),
         "verifier_pass_rate": (
             sum(row["verifier_verdict"] == "PASS" for row in trajectories) / len(tasks)
+        ),
+        "preflight_pass_rate": (
+            sum(row["preflight"]["ok"] for row in trajectories) / len(tasks)
         ),
         "tests_executed": False,
     }
