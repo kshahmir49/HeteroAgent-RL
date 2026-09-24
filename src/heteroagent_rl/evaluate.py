@@ -13,6 +13,7 @@ from heteroagent_rl.code_utils import extract_code, parse_verdict
 from heteroagent_rl.clients.mock import MockLLMClient
 from heteroagent_rl.clients.ollama import OllamaClient
 from heteroagent_rl.preflight import preflight_solution
+from heteroagent_rl.repair import repair_known_preflight_issues
 from heteroagent_rl.sandbox.runner import run_evalplus_sandbox
 from heteroagent_rl.workflow.fixed import FixedWorkflow
 
@@ -115,9 +116,11 @@ def main() -> None:
     for index, task in enumerate(tasks, start=1):
         print(f"[{index}/{len(tasks)}] {task.task_id}")
         result = workflow.run(task.prompt)
-        solution = extract_code(result.final_answer)
+        raw_solution = extract_code(result.final_answer)
         verifier_verdict = parse_verdict(result.steps[-1].response)
-        preflight = preflight_solution(solution)
+        repair = repair_known_preflight_issues(raw_solution)
+        solution = repair.repaired_code
+        preflight = repair.repaired_preflight or preflight_solution(solution)
 
         solutions[task.task_id] = solution
         samples.append(
@@ -131,6 +134,9 @@ def main() -> None:
                 "task_id": task.task_id,
                 "entry_point": task.entry_point,
                 "verifier_verdict": verifier_verdict,
+                "raw_model_solution": raw_solution,
+                "system_solution": solution,
+                "repair": repair.to_dict(),
                 "preflight": preflight.to_dict(),
                 **result.to_dict(),
             }
@@ -160,8 +166,19 @@ def main() -> None:
         "verifier_pass_rate": (
             sum(row["verifier_verdict"] == "PASS" for row in trajectories) / len(tasks)
         ),
+        "raw_preflight_pass_rate": (
+            sum(
+                bool(row["repair"]["raw_preflight"]["ok"])
+                for row in trajectories
+                if row["repair"]["raw_preflight"] is not None
+            )
+            / len(tasks)
+        ),
         "preflight_pass_rate": (
             sum(row["preflight"]["ok"] for row in trajectories) / len(tasks)
+        ),
+        "repair_rate": (
+            sum(row["repair"]["applied"] for row in trajectories) / len(tasks)
         ),
         "tests_executed": False,
     }
