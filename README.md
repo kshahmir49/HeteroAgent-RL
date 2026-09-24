@@ -189,3 +189,41 @@ Use heterogeneous models and compare learned orchestration against fixed workflo
 ## Engineering principle
 
 Do not add RL until the environment, logging, and evaluation are trustworthy. A good RL controller cannot rescue a poorly specified environment.
+
+
+## Phase 1B benchmark harness
+
+The `phase1b-eval` branch adds lightweight generation and evaluation support for EvalPlus coding tasks.
+
+Install the benchmark dependency
+
+```bash
+pip install -e ".[bench,dev]"
+```
+
+Generate solutions for the first 5 HumanEval+ tasks without executing model-generated code
+
+```bash
+python -m heteroagent_rl.evaluate \
+  --benchmark humaneval \
+  --limit 5
+```
+
+This writes
+
+```text
+runs/humaneval/samples.jsonl
+runs/humaneval/trajectories.jsonl
+runs/humaneval/summary.json
+```
+
+The summary includes token usage, latency, and the LLM Verifier's PASS rate.
+
+### Important safety note
+
+By default, the benchmark command does **not** execute generated Python.
+
+Passing `--run-tests` invokes EvalPlus correctness checks and therefore executes model-generated code locally. EvalPlus recommends sandboxing untrusted code. Do not use `--run-tests` on your host machine unless you explicitly accept that risk.
+
+For now, use generation-only mode. We will add a safer sandboxed execution path before relying on objective pass/fail scoring.
+
