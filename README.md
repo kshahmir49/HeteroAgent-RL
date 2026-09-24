@@ -285,3 +285,31 @@ The resulting summary adds objective metrics such as
 
 These metrics give us the first machine-checkable reward signal for the future RL environment.
 
+
+## Phase 1E deterministic repair
+
+The evaluator now applies a narrow deterministic repair layer after preflight and before sandbox execution.
+
+Currently supported repair
+
+- missing imports from `typing` when every unresolved annotation name maps unambiguously to `typing`
+
+The evaluator preserves both versions
+
+```text
+raw_model_solution
+system_solution
+```
+
+and records
+
+```text
+raw_preflight_pass_rate
+preflight_pass_rate
+repair_rate
+```
+
+This keeps model quality separate from system quality. A repaired solution is never reported as if the model generated it correctly on the first try.
+
+The repair layer deliberately does not modify syntax errors, unknown unresolved names, or logic errors. Those remain visible for later tool feedback and LLM repair experiments.
+
