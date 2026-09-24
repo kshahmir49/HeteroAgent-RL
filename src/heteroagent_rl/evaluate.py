@@ -12,6 +12,7 @@ from heteroagent_rl.benchmarks.evalplus_adapter import load_evalplus_problems
 from heteroagent_rl.code_utils import extract_code, parse_verdict
 from heteroagent_rl.clients.mock import MockLLMClient
 from heteroagent_rl.clients.ollama import OllamaClient
+from heteroagent_rl.metrics import summarize_verifier_calibration
 from heteroagent_rl.preflight import preflight_solution
 from heteroagent_rl.repair import repair_known_preflight_issues
 from heteroagent_rl.sandbox.runner import run_evalplus_sandbox
@@ -193,8 +194,7 @@ def main() -> None:
         )
 
         base_pass = 0
-        plus_pass = 0
-        false_pass = 0
+        strict_plus_pass = 0
 
         for row in trajectories:
             result = scored[row["task_id"]]
@@ -204,10 +204,11 @@ def main() -> None:
             row["plus_status"] = plus_status
 
             base_ok = base_status == "pass"
-            plus_ok = plus_status == "pass"
+            strict_plus_ok = base_ok and plus_status == "pass"
             base_pass += int(base_ok)
-            plus_pass += int(plus_ok)
-            false_pass += int(row["verifier_verdict"] == "PASS" and not plus_ok)
+            strict_plus_pass += int(strict_plus_ok)
+
+        verifier_metrics = summarize_verifier_calibration(trajectories)
 
         write_jsonl(trajectory_path, trajectories)
         summary.update(
@@ -215,8 +216,8 @@ def main() -> None:
                 "tests_executed": True,
                 "sandbox_backend": sandbox_backend,
                 "base_pass_rate": base_pass / len(tasks),
-                "plus_pass_rate": plus_pass / len(tasks),
-                "verifier_false_pass_rate": false_pass / len(tasks),
+                "plus_pass_rate": strict_plus_pass / len(tasks),
+                **verifier_metrics,
             }
         )
 
