@@ -13,10 +13,14 @@ dependencies = []
 openai = [
   "openai>=1.40.0",
 ]
+bench = [
+  "evalplus>=0.3.1",
+]
 dev = [
   "pytest>=8.0",
 ]
 all = [
+  "evalplus>=0.3.1",
   "openai>=1.40.0",
   "pytest>=8.0",
 ]
