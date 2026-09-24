@@ -227,3 +227,61 @@ Passing `--run-tests` invokes EvalPlus correctness checks and therefore executes
 
 For now, use generation-only mode. We will add a safer sandboxed execution path before relying on objective pass/fail scoring.
 
+
+## Phase 1C isolated execution
+
+The evaluator can now run EvalPlus inside a container boundary instead of executing model-generated Python directly in the host process.
+
+Check which sandbox backends are available
+
+```bash
+python -m heteroagent_rl.sandbox
+```
+
+The supported backends are
+
+- Apple `container`
+- Docker
+
+On Apple silicon Macs running macOS 26, Apple's `container` CLI is the preferred lightweight option. Start its service with
+
+```bash
+container system start
+```
+
+Then run a small end-to-end benchmark with objective tests
+
+```bash
+python -m heteroagent_rl.evaluate \
+  --benchmark humaneval \
+  --limit 3 \
+  --run-tests
+```
+
+The evaluator automatically prefers Apple `container` when available and falls back to Docker.
+
+The sandboxed worker runs with
+
+- networking disabled
+- a read-only root filesystem
+- read-only benchmark inputs
+- a temporary writable `/tmp`
+- CPU and memory limits
+- only a disposable output directory mounted writable
+
+Generated code is still untrusted. Containerization substantially improves isolation but should not be treated as a formal security proof.
+
+The resulting summary adds objective metrics such as
+
+```json
+{
+  "tests_executed": true,
+  "sandbox_backend": "apple",
+  "base_pass_rate": 0.0,
+  "plus_pass_rate": 0.0,
+  "verifier_false_pass_rate": 0.0
+}
+```
+
+These metrics give us the first machine-checkable reward signal for the future RL environment.
+

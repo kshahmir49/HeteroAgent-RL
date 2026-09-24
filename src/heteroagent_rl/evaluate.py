@@ -8,13 +8,11 @@ from pathlib import Path
 from heteroagent_rl.agents.executor import build_executor
 from heteroagent_rl.agents.planner import build_planner
 from heteroagent_rl.agents.verifier import build_verifier
-from heteroagent_rl.benchmarks.evalplus_adapter import (
-    load_evalplus_problems,
-    score_evalplus_subset,
-)
+from heteroagent_rl.benchmarks.evalplus_adapter import load_evalplus_problems
 from heteroagent_rl.code_utils import extract_code, parse_verdict
 from heteroagent_rl.clients.mock import MockLLMClient
 from heteroagent_rl.clients.ollama import OllamaClient
+from heteroagent_rl.sandbox.runner import run_evalplus_sandbox
 from heteroagent_rl.workflow.fixed import FixedWorkflow
 
 
@@ -49,10 +47,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--run-tests",
         action="store_true",
-        help=(
-            "Execute generated code with EvalPlus. This runs model-generated Python "
-            "on your machine. Use only if you accept the local execution risk."
-        ),
+        help="Run EvalPlus correctness tests inside an isolated container backend.",
+    )
+    parser.add_argument(
+        "--sandbox-backend",
+        choices=["auto", "apple", "docker"],
+        default="auto",
+        help="Isolation backend used only with --run-tests.",
+    )
+    parser.add_argument(
+        "--sandbox-timeout",
+        type=float,
+        default=300.0,
+        help="Maximum wall-clock seconds for the whole sandbox evaluation.",
     )
     return parser.parse_args()
 
@@ -154,21 +161,25 @@ def main() -> None:
     }
 
     if args.run_tests:
-        print(
-            "WARNING — --run-tests executes model-generated Python locally. "
-            "EvalPlus recommends using a sandbox such as Docker for untrusted code."
+        sandbox_backend, scored = run_evalplus_sandbox(
+            args.benchmark,
+            raw_problems,
+            solutions,
+            backend=args.sandbox_backend,
+            timeout_s=args.sandbox_timeout,
         )
-        scored = score_evalplus_subset(args.benchmark, raw_problems, solutions)
+
         base_pass = 0
         plus_pass = 0
         false_pass = 0
 
         for row in trajectories:
             result = scored[row["task_id"]]
-            base_status = result["base"][0]
-            plus_status = result["plus"][0]
+            base_status = result["base_status"]
+            plus_status = result["plus_status"]
             row["base_status"] = base_status
             row["plus_status"] = plus_status
+
             base_ok = base_status == "pass"
             plus_ok = plus_status == "pass"
             base_pass += int(base_ok)
@@ -179,6 +190,7 @@ def main() -> None:
         summary.update(
             {
                 "tests_executed": True,
+                "sandbox_backend": sandbox_backend,
                 "base_pass_rate": base_pass / len(tasks),
                 "plus_pass_rate": plus_pass / len(tasks),
                 "verifier_false_pass_rate": false_pass / len(tasks),
