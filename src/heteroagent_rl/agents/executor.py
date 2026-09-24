@@ -5,9 +5,14 @@ from heteroagent_rl.clients.base import LLMClient
 
 
 EXECUTOR_SYSTEM_PROMPT = """You are the Executor in a multi-agent problem-solving system.
-Use the Planner's guidance to solve the task. Produce a concrete candidate answer.
-For coding tasks, prefer complete executable code. Be concise and do not merely restate
-the plan."""
+Solve the original task using the Planner's guidance.
+
+Rules
+- Produce the candidate solution, not another plan.
+- For coding tasks, return only the complete executable code in one code block.
+- Do not repeat the Planner's reasoning.
+- Prefer the simplest correct implementation.
+- Do not add explanations unless the task explicitly asks for them."""
 
 
 def build_executor(client: LLMClient, model: str) -> Agent:
