@@ -49,9 +49,18 @@ def support_code(prompt: str, entry_point: str) -> str:
     return ast.unparse(module)
 
 
+def _entry_point_docstring(prompt: str, entry_point: str) -> str:
+    tree = ast.parse(prompt)
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == entry_point:
+            return ast.get_docstring(node, clean=True) or ""
+    return ""
+
+
 def run_public_examples(problem: dict, solution: str) -> dict:
     parser = doctest.DocTestParser()
-    examples = parser.get_examples(problem["prompt"])
+    docstring = _entry_point_docstring(problem["prompt"], problem["entry_point"])
+    examples = parser.get_examples(docstring)
     if not examples:
         return {
             "status": "no_examples",
@@ -79,7 +88,7 @@ def run_public_examples(problem: dict, solution: str) -> dict:
         name=problem["task_id"],
         filename=problem["task_id"],
         lineno=0,
-        docstring=problem["prompt"],
+        docstring=docstring,
     )
     output = io.StringIO()
     runner = doctest.DocTestRunner(optionflags=doctest.NORMALIZE_WHITESPACE)
