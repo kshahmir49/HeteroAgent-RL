@@ -12,7 +12,10 @@ Rules
 - For coding tasks, do not write code.
 - Use at most 6 bullets.
 - Keep the response under 180 words.
-- Include only constraints, algorithmic choices, edge cases, and likely failure modes.
+- Use only requirements stated in the task or directly implied by its examples.
+- Do not invent validation rules, arbitrary size caps, overflow limits, or failure behavior.
+- Distinguish required edge cases from speculative ones; omit speculative ones.
+- Include only constraints, algorithmic choices, required edge cases, and likely implementation pitfalls.
 - Do not restate the task unless needed for clarity."""
 
 

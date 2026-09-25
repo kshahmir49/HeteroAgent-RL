@@ -313,3 +313,49 @@ This keeps model quality separate from system quality. A repaired solution is ne
 
 The repair layer deliberately does not modify syntax errors, unknown unresolved names, or logic errors. Those remain visible for later tool feedback and LLM repair experiments.
 
+
+## Phase 1G public-example repair
+
+The evaluator can now use only prompt-visible examples as development feedback before held-out EvalPlus scoring.
+
+Enable one-shot repair with
+
+```bash
+python -m heteroagent_rl.evaluate \
+  --benchmark humaneval \
+  --limit 25 \
+  --public-repair \
+  --run-tests
+```
+
+The flow is
+
+```text
+Planner
+  ↓
+Executor
+  ↓
+deterministic preflight repair
+  ↓
+public examples in isolated sandbox
+  ↓ fail
+one Repairer call
+  ↓
+public examples rerun
+  ↓
+held-out EvalPlus evaluation
+```
+
+The Repairer receives only the original task, the current candidate, and failures from examples already visible in the benchmark prompt. Held-out EvalPlus inputs are never fed back into the model.
+
+New metrics include
+
+```text
+public_examples_initial_pass_rate
+llm_repair_rate
+llm_repair_success_rate
+public_examples_final_pass_rate
+```
+
+Verifier calibration excludes tasks changed by the LLM Repairer because the original Verifier did not judge the repaired solution.
+
