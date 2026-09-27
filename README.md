@@ -359,3 +359,37 @@ public_examples_final_pass_rate
 
 Verifier calibration excludes tasks changed by the LLM Repairer because the original Verifier did not judge the repaired solution.
 
+
+
+## Phase 2A RL environment
+
+Phase 2A introduces a framework-independent environment for learning when to call each agent.
+
+The discrete action space is
+
+```text
+CALL_PLANNER
+CALL_EXECUTOR
+CALL_VERIFIER
+CALL_REPAIR
+STOP
+```
+
+The observation intentionally exposes compact orchestration signals rather than held-out test data. It includes whether a plan or candidate exists, static preflight status, public-example status, verifier verdict, call count, token use, latency, step count, and remaining budget.
+
+Candidate inspection after Executor or Repairer output may apply the deterministic preflight repair and may run a caller-provided public-feedback function. The held-out terminal scorer is separate and is called only when the controller chooses STOP or exhausts its step budget.
+
+The default reward is
+
+```text
+terminal correctness
+- per-call penalty
+- token penalty
+- latency penalty
+- invalid-action penalty
+```
+
+This keeps correctness as the main objective while making unnecessary model calls costly.
+
+The environment itself does not depend on Gymnasium, Stable-Baselines3, or a specific RL algorithm. That keeps the transition logic testable before adding PPO or another learner.
+
