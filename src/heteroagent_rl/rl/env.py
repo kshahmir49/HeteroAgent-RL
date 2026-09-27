@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -8,7 +9,12 @@ from heteroagent_rl.code_utils import extract_code, parse_verdict
 from heteroagent_rl.preflight import preflight_solution
 from heteroagent_rl.repair import repair_known_preflight_issues
 from heteroagent_rl.rl.actions import ControllerAction
-from heteroagent_rl.rl.reward import RewardConfig, llm_step_cost, terminal_reward
+from heteroagent_rl.rl.reward import (
+    RewardConfig,
+    llm_step_cost,
+    terminal_reward,
+    tool_step_cost,
+)
 from heteroagent_rl.schema import StepRecord
 
 
@@ -18,6 +24,7 @@ class CandidateFeedback:
     report: str = ""
     attempted: int = 0
     failed: int = 0
+    latency_s: float = 0.0
 
     @property
     def passed(self) -> bool:
@@ -35,8 +42,10 @@ class RLState:
     preflight_ok: bool | None = None
     mechanical_repairs: int = 0
     llm_calls: int = 0
+    tool_calls: int = 0
     total_tokens: int = 0
     total_latency_s: float = 0.0
+    total_tool_latency_s: float = 0.0
     step_count: int = 0
     done: bool = False
     terminal_success: float | None = None
@@ -58,9 +67,9 @@ TerminalScoreFn = Callable[[str, str], float | bool]
 class HeteroAgentEnv:
     """Framework-independent RL environment for agent orchestration.
 
-    Public feedback may inspect prompt-visible examples. The terminal scorer is
-    called only when an episode stops and should be the only component with
-    access to held-out evaluation.
+    Public tests are an explicit action. The terminal scorer is called only when
+    an episode stops and should be the only component with access to held-out
+    evaluation.
     """
 
     def __init__(
@@ -73,7 +82,7 @@ class HeteroAgentEnv:
         public_feedback_fn: FeedbackFn | None = None,
         terminal_score_fn: TerminalScoreFn | None = None,
         reward_config: RewardConfig | None = None,
-        max_steps: int = 8,
+        max_steps: int = 10,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be at least 1")
@@ -112,6 +121,8 @@ class HeteroAgentEnv:
         }
         if state.candidate is not None:
             actions.add(ControllerAction.CALL_VERIFIER)
+            if self.public_feedback_fn is not None:
+                actions.add(ControllerAction.RUN_PUBLIC_TESTS)
         if (
             state.candidate is not None
             and state.public_feedback is not None
@@ -139,13 +150,15 @@ class HeteroAgentEnv:
             "preflight_ok": bool(state.preflight_ok),
             "mechanical_repairs": state.mechanical_repairs,
             "llm_calls": state.llm_calls,
+            "tool_calls": state.tool_calls,
             "total_tokens": state.total_tokens,
             "total_latency_s": state.total_latency_s,
+            "total_tool_latency_s": state.total_tool_latency_s,
             "step_count": state.step_count,
             "remaining_steps": max(0, self.max_steps - state.step_count),
         }
 
-    def _record_step(self, step: StepRecord) -> float:
+    def _record_llm_step(self, step: StepRecord) -> float:
         state = self._require_state()
         state.history.append(step)
         state.llm_calls += 1
@@ -167,14 +180,33 @@ class HeteroAgentEnv:
         state.preflight_ok = preflight_solution(state.candidate).ok
         state.verifier_feedback = None
         state.verifier_verdict = "UNKNOWN"
+        state.public_feedback = None
 
-        if self.public_feedback_fn is None:
-            state.public_feedback = None
-        else:
-            state.public_feedback = self.public_feedback_fn(
-                state.task,
-                state.candidate,
+    def _run_public_tests(self) -> tuple[CandidateFeedback, float]:
+        state = self._require_state()
+        if self.public_feedback_fn is None or state.candidate is None:
+            raise RuntimeError("Public tests are not configured for this episode.")
+
+        start = time.perf_counter()
+        feedback = self.public_feedback_fn(state.task, state.candidate)
+        measured_latency = time.perf_counter() - start
+        latency_s = feedback.latency_s if feedback.latency_s > 0 else measured_latency
+        if feedback.latency_s != latency_s:
+            feedback = CandidateFeedback(
+                status=feedback.status,
+                report=feedback.report,
+                attempted=feedback.attempted,
+                failed=feedback.failed,
+                latency_s=latency_s,
             )
+
+        state.public_feedback = feedback
+        state.tool_calls += 1
+        state.total_tool_latency_s += latency_s
+        return feedback, tool_step_cost(
+            latency_s=latency_s,
+            config=self.reward_config,
+        )
 
     def _planner_prompt(self) -> str:
         state = self._require_state()
@@ -269,22 +301,28 @@ Repair the candidate using only the original task and the public example failure
         if action == ControllerAction.CALL_PLANNER:
             step = self.planner.run(self._planner_prompt())
             state.plan = step.response
-            reward -= self._record_step(step)
+            reward -= self._record_llm_step(step)
 
         elif action == ControllerAction.CALL_EXECUTOR:
             step = self.executor.run(self._executor_prompt())
-            reward -= self._record_step(step)
+            reward -= self._record_llm_step(step)
             self._inspect_candidate(extract_code(step.response))
+
+        elif action == ControllerAction.RUN_PUBLIC_TESTS:
+            feedback, cost = self._run_public_tests()
+            reward -= cost
+            info["public_test_status"] = feedback.status
+            info["public_test_latency_s"] = feedback.latency_s
 
         elif action == ControllerAction.CALL_VERIFIER:
             step = self.verifier.run(self._verifier_prompt())
-            reward -= self._record_step(step)
+            reward -= self._record_llm_step(step)
             state.verifier_feedback = step.response
             state.verifier_verdict = parse_verdict(step.response)
 
         elif action == ControllerAction.CALL_REPAIR:
             step = self.repairer.run(self._repair_prompt())
-            reward -= self._record_step(step)
+            reward -= self._record_llm_step(step)
             self._inspect_candidate(extract_code(step.response))
 
         state.step_count += 1
