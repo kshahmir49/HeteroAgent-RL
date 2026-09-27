@@ -30,7 +30,7 @@ class FakeAgent:
         )
 
 
-def build_env(*, public_feedback_fn=None, terminal_score_fn=None, max_steps=8):
+def build_env(*, public_feedback_fn=None, terminal_score_fn=None, max_steps=10):
     return HeteroAgentEnv(
         planner=FakeAgent("planner", ["Use direct arithmetic."]),
         executor=FakeAgent(
@@ -53,24 +53,26 @@ def build_env(*, public_feedback_fn=None, terminal_score_fn=None, max_steps=8):
             call_penalty=0.01,
             token_penalty_per_1k=0.0,
             latency_penalty_per_s=0.0,
+            tool_call_penalty=0.02,
+            tool_latency_penalty_per_s=0.0,
             invalid_action_penalty=0.05,
         ),
         max_steps=max_steps,
     )
 
 
-def test_reset_and_action_mask_require_candidate_for_verifier():
+def test_reset_and_action_mask_require_candidate_for_tools_and_verifier():
     env = build_env()
     obs = env.reset("Implement solve.")
 
     assert not obs["has_candidate"]
-    assert env.action_mask() == [1, 1, 0, 0, 1]
+    assert env.action_mask() == [1, 1, 0, 0, 0, 1]
 
     transition = env.step(ControllerAction.CALL_EXECUTOR)
 
     assert transition.reward == pytest.approx(-0.01)
     assert transition.observation["has_candidate"]
-    assert env.action_mask() == [1, 1, 1, 0, 1]
+    assert env.action_mask() == [1, 1, 0, 1, 0, 1]
 
 
 def test_terminal_scorer_runs_only_on_stop():
@@ -94,32 +96,41 @@ def test_terminal_scorer_runs_only_on_stop():
     assert len(calls) == 1
 
 
-def test_public_failure_unlocks_repair_and_rechecks_candidate():
+def test_public_tests_are_explicit_and_unlock_repair():
     def public_feedback(task: str, candidate: str) -> CandidateFeedback:
         if "x * 2" in candidate:
-            return CandidateFeedback(status="pass", attempted=1, failed=0)
+            return CandidateFeedback(status="pass", attempted=1, failed=0, latency_s=0.25)
         return CandidateFeedback(
             status="fail",
             report="Expected 4 but got 3.",
             attempted=1,
             failed=1,
+            latency_s=0.25,
         )
 
     env = build_env(public_feedback_fn=public_feedback)
     env.reset("Implement solve.")
 
-    first = env.step(ControllerAction.CALL_EXECUTOR)
+    generated = env.step(ControllerAction.CALL_EXECUTOR)
+    assert not generated.observation["public_examples_available"]
+    assert ControllerAction.RUN_PUBLIC_TESTS in env.valid_actions()
+    assert ControllerAction.CALL_REPAIR not in env.valid_actions()
 
-    assert first.observation["public_examples_fail"]
+    tested = env.step(ControllerAction.RUN_PUBLIC_TESTS)
+    assert tested.reward == pytest.approx(-0.02)
+    assert tested.observation["public_examples_fail"]
+    assert tested.observation["tool_calls"] == 1
+    assert tested.observation["total_tool_latency_s"] == pytest.approx(0.25)
     assert ControllerAction.CALL_REPAIR in env.valid_actions()
 
-    second = env.step(ControllerAction.CALL_REPAIR)
+    repaired = env.step(ControllerAction.CALL_REPAIR)
+    assert not repaired.observation["public_examples_available"]
+    assert ControllerAction.RUN_PUBLIC_TESTS in env.valid_actions()
 
-    assert second.observation["public_examples_pass"]
-    assert not second.observation["public_examples_fail"]
+    retested = env.step(ControllerAction.RUN_PUBLIC_TESTS)
+    assert retested.observation["public_examples_pass"]
+    assert retested.observation["tool_calls"] == 2
     assert ControllerAction.CALL_REPAIR not in env.valid_actions()
-    assert env.state is not None
-    assert "x * 2" in env.state.candidate
 
 
 def test_invalid_repair_action_is_penalized_without_llm_call():
