@@ -10,6 +10,7 @@ from heteroagent_rl.agents.planner import build_planner
 from heteroagent_rl.agents.repairer import build_repairer
 from heteroagent_rl.agents.verifier import build_verifier
 from heteroagent_rl.benchmarks.evalplus_adapter import load_evalplus_problems
+from heteroagent_rl.benchmarks.splits import SplitConfig, select_split
 from heteroagent_rl.clients.mock import MockLLMClient
 from heteroagent_rl.clients.ollama import OllamaClient
 from heteroagent_rl.rl.controllers import CONTROLLERS, build_controller, run_controller_episode
@@ -29,7 +30,9 @@ def parse_args() -> argparse.Namespace:
         description="Evaluate deterministic controller baselines through the RL environment."
     )
     parser.add_argument("--benchmark", choices=["humaneval", "mbpp"], default="humaneval")
-    parser.add_argument("--limit", type=int, default=25)
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--split", choices=["all", "train", "dev", "test"], default="all")
+    parser.add_argument("--split-seed", default="heteroagent-rl-v1")
     parser.add_argument("--controller", choices=sorted(CONTROLLERS), default="full_pipeline")
     parser.add_argument("--output-dir", default="runs/controllers")
     parser.add_argument("--backend", choices=["ollama", "mock", "openai"], default="ollama")
@@ -53,10 +56,12 @@ def parse_args() -> argparse.Namespace:
         default="auto",
     )
     parser.add_argument("--sandbox-timeout", type=float, default=300.0)
-    parser.add_argument("--max-steps", type=int, default=8)
+    parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument("--call-penalty", type=float, default=0.01)
     parser.add_argument("--token-penalty-per-1k", type=float, default=0.001)
     parser.add_argument("--latency-penalty-per-s", type=float, default=0.001)
+    parser.add_argument("--tool-call-penalty", type=float, default=0.005)
+    parser.add_argument("--tool-latency-penalty-per-s", type=float, default=0.001)
     return parser.parse_args()
 
 
@@ -84,12 +89,24 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
 
 def main() -> None:
     args = parse_args()
-    if args.limit < 1:
+    if args.limit is not None and args.limit < 1:
         raise SystemExit("--limit must be at least 1")
     if args.max_steps < 1:
         raise SystemExit("--max-steps must be at least 1")
 
-    tasks, raw_problems = load_evalplus_problems(args.benchmark, limit=args.limit)
+    all_tasks, all_problems = load_evalplus_problems(args.benchmark, limit=None)
+    split_config = SplitConfig(seed=args.split_seed)
+    selected_ids = select_split(
+        [task.task_id for task in all_tasks],
+        args.split,
+        config=split_config,
+    )
+    if args.limit is not None:
+        selected_ids = selected_ids[: args.limit]
+    selected_set = set(selected_ids)
+    tasks = [task for task in all_tasks if task.task_id in selected_set]
+    tasks.sort(key=lambda task: selected_ids.index(task.task_id))
+    raw_problems = {task_id: all_problems[task_id] for task_id in selected_ids}
     client = build_client(args)
     planner = build_planner(client, args.planner_model)
     executor = build_executor(client, args.executor_model)
@@ -99,6 +116,8 @@ def main() -> None:
         call_penalty=args.call_penalty,
         token_penalty_per_1k=args.token_penalty_per_1k,
         latency_penalty_per_s=args.latency_penalty_per_s,
+        tool_call_penalty=args.tool_call_penalty,
+        tool_latency_penalty_per_s=args.tool_latency_penalty_per_s,
     )
 
     rows: list[dict] = []
@@ -178,11 +197,15 @@ def main() -> None:
     total_tokens = sum(int(row["total_tokens"]) for row in rows)
     total_latency = sum(float(row["total_latency_s"]) for row in rows)
     total_calls = sum(int(row["llm_calls"]) for row in rows)
+    total_tool_calls = sum(int(row["tool_calls"]) for row in rows)
+    total_tool_latency = sum(float(row["total_tool_latency_s"]) for row in rows)
 
     summary = {
         "benchmark": args.benchmark,
         "controller": args.controller,
         "num_tasks": len(tasks),
+        "split": args.split,
+        "split_seed": args.split_seed,
         "backend": "mock" if args.mock else args.backend,
         "planner_model": args.planner_model,
         "executor_model": args.executor_model,
@@ -193,10 +216,14 @@ def main() -> None:
         "plus_pass_rate": plus_pass / len(tasks),
         "total_llm_calls": total_calls,
         "avg_llm_calls": total_calls / len(tasks),
+        "total_tool_calls": total_tool_calls,
+        "avg_tool_calls": total_tool_calls / len(tasks),
         "total_tokens": total_tokens,
         "avg_tokens": total_tokens / len(tasks),
         "total_latency_s": total_latency,
         "avg_latency_s": total_latency / len(tasks),
+        "total_tool_latency_s": total_tool_latency,
+        "avg_tool_latency_s": total_tool_latency / len(tasks),
         "total_policy_reward": total_policy_reward,
         "avg_policy_reward": total_policy_reward / len(tasks),
         "reward_config": {
@@ -205,6 +232,8 @@ def main() -> None:
             "call_penalty": reward_config.call_penalty,
             "token_penalty_per_1k": reward_config.token_penalty_per_1k,
             "latency_penalty_per_s": reward_config.latency_penalty_per_s,
+            "tool_call_penalty": reward_config.tool_call_penalty,
+            "tool_latency_penalty_per_s": reward_config.tool_latency_penalty_per_s,
             "invalid_action_penalty": reward_config.invalid_action_penalty,
         },
     }
