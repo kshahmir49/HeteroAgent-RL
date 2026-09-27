@@ -393,3 +393,41 @@ This keeps correctness as the main objective while making unnecessary model call
 
 The environment itself does not depend on Gymnasium, Stable-Baselines3, or a specific RL algorithm. That keeps the transition logic testable before adding PPO or another learner.
 
+
+
+## Phase 2B deterministic controller baselines
+
+Before training a learned policy, the RL environment now supports deterministic controller baselines.
+
+Available controllers
+
+```text
+executor_only
+planner_executor
+public_repair
+full_pipeline
+```
+
+Run one controller on the same 25-task HumanEval slice
+
+```bash
+python -m heteroagent_rl.rl.evaluate_baselines \
+  --benchmark humaneval \
+  --limit 25 \
+  --controller executor_only
+```
+
+Then repeat with the other controller names.
+
+Each run uses the same RL environment and writes
+
+```text
+runs/controllers/humaneval/<controller>/trajectories.jsonl
+runs/controllers/humaneval/<controller>/summary.json
+```
+
+The summary reports objective base and strict EvalPlus+ pass rates together with model-call count, token usage, latency, and policy reward.
+
+Public examples are available as environment feedback after candidate generation, but held-out EvalPlus scoring is performed only after the episode has terminated. This preserves the separation between development feedback and terminal ground truth.
+
+These controller baselines establish the comparison points needed before training PPO or another learned policy.
