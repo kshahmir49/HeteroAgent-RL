@@ -28,11 +28,7 @@ class ExecutorOnlyController:
     def reset(self) -> None:
         pass
 
-    def select_action(
-        self,
-        observation: dict[str, float | int | bool],
-        action_mask: list[int],
-    ) -> ControllerAction:
+    def select_action(self, observation, action_mask) -> ControllerAction:
         if not observation["has_candidate"]:
             return ControllerAction.CALL_EXECUTOR
         return ControllerAction.STOP
@@ -45,11 +41,7 @@ class PlannerExecutorController:
     def reset(self) -> None:
         pass
 
-    def select_action(
-        self,
-        observation: dict[str, float | int | bool],
-        action_mask: list[int],
-    ) -> ControllerAction:
+    def select_action(self, observation, action_mask) -> ControllerAction:
         if not observation["has_plan"]:
             return ControllerAction.CALL_PLANNER
         if not observation["has_candidate"]:
@@ -65,15 +57,13 @@ class PublicRepairController:
     def reset(self) -> None:
         self._repair_attempted = False
 
-    def select_action(
-        self,
-        observation: dict[str, float | int | bool],
-        action_mask: list[int],
-    ) -> ControllerAction:
+    def select_action(self, observation, action_mask) -> ControllerAction:
         if not observation["has_plan"]:
             return ControllerAction.CALL_PLANNER
         if not observation["has_candidate"]:
             return ControllerAction.CALL_EXECUTOR
+        if not observation["public_examples_available"]:
+            return ControllerAction.RUN_PUBLIC_TESTS
         if observation["public_examples_fail"] and not self._repair_attempted:
             self._repair_attempted = True
             return ControllerAction.CALL_REPAIR
@@ -88,15 +78,13 @@ class FullPipelineController:
     def reset(self) -> None:
         self._repair_attempted = False
 
-    def select_action(
-        self,
-        observation: dict[str, float | int | bool],
-        action_mask: list[int],
-    ) -> ControllerAction:
+    def select_action(self, observation, action_mask) -> ControllerAction:
         if not observation["has_plan"]:
             return ControllerAction.CALL_PLANNER
         if not observation["has_candidate"]:
             return ControllerAction.CALL_EXECUTOR
+        if not observation["public_examples_available"]:
+            return ControllerAction.RUN_PUBLIC_TESTS
         if observation["public_examples_fail"] and not self._repair_attempted:
             self._repair_attempted = True
             return ControllerAction.CALL_REPAIR
@@ -153,8 +141,10 @@ def run_controller_episode(
         "environment_reward": total_reward,
         "candidate": state.candidate or "",
         "llm_calls": state.llm_calls,
+        "tool_calls": state.tool_calls,
         "total_tokens": state.total_tokens,
         "total_latency_s": state.total_latency_s,
+        "total_tool_latency_s": state.total_tool_latency_s,
         "mechanical_repairs": state.mechanical_repairs,
         "verifier_verdict": state.verifier_verdict,
         "public_examples_status": (
