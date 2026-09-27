@@ -431,3 +431,52 @@ The summary reports objective base and strict EvalPlus+ pass rates together with
 Public examples are available as environment feedback after candidate generation, but held-out EvalPlus scoring is performed only after the episode has terminated. This preserves the separation between development feedback and terminal ground truth.
 
 These controller baselines establish the comparison points needed before training PPO or another learned policy.
+
+
+## Phase 2C explicit tools and benchmark splits
+
+Public-example execution is now an explicit controller action rather than free feedback.
+
+The action space is
+
+```text
+CALL_PLANNER
+CALL_EXECUTOR
+RUN_PUBLIC_TESTS
+CALL_VERIFIER
+CALL_REPAIR
+STOP
+```
+
+The environment tracks LLM and sandbox-tool cost separately
+
+```text
+llm_calls
+total_tokens
+total_latency_s
+tool_calls
+total_tool_latency_s
+```
+
+Reward configuration now includes both LLM-call costs and tool-call costs. A candidate change clears stale public-test feedback, so a controller must explicitly rerun public tests after a repair.
+
+Phase 2C also adds deterministic benchmark partitions. The default split seed is
+
+```text
+heteroagent-rl-v1
+```
+
+with 60 percent train, 20 percent development, and 20 percent test partitions. Splits are deterministic and disjoint for a given benchmark and seed.
+
+For example
+
+```bash
+python -m heteroagent_rl.rl.evaluate_baselines \
+  --benchmark humaneval \
+  --split dev \
+  --controller full_pipeline
+```
+
+Use `--split train` for controller training and policy development, `--split dev` for model selection and reward tuning, and `--split test` only for final held-out reporting. `--split all` remains available for regression experiments.
+
+The baseline summaries now report tool calls and tool latency in addition to LLM calls, tokens, LLM latency, correctness, and policy reward.
