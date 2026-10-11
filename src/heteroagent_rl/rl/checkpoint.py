@@ -34,20 +34,20 @@ def load_jsonl_by_task(path: Path) -> dict[str, dict[str, Any]]:
         return {}
 
     rows: dict[str, dict[str, Any]] = {}
-    with path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                if line_number == sum(1 for _ in path.open("r", encoding="utf-8")):
-                    break
-                raise
-            task_id = row.get("task_id")
-            if not isinstance(task_id, str):
-                raise ValueError(f"Checkpoint row {line_number} is missing task_id.")
-            rows[task_id] = row
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            if index == len(lines) - 1:
+                break
+            raise
+        task_id = row.get("task_id")
+        if not isinstance(task_id, str):
+            raise ValueError(f"Checkpoint row {index + 1} is missing task_id.")
+        rows[task_id] = row
     return rows
 
 
