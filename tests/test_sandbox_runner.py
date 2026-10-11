@@ -25,3 +25,44 @@ def test_apple_command_has_vm_isolation_controls():
     assert "--rosetta" in command
     assert "/tmp/input:/input:ro" in command
     assert "/tmp/output:/output" in command
+
+
+def test_resolve_backend_retries_transient_failure(monkeypatch):
+    import heteroagent_rl.sandbox.runner as runner
+
+    calls = {"count": 0}
+
+    def fake_available_backends():
+        calls["count"] += 1
+        return {
+            "apple": calls["count"] >= 2,
+            "docker": False,
+        }
+
+    monkeypatch.setattr(runner, "available_backends", fake_available_backends)
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+
+    assert runner.resolve_backend("auto", retries=2) == "apple"
+    assert calls["count"] == 2
+
+
+def test_resolve_backend_fails_after_retry_budget(monkeypatch):
+    import heteroagent_rl.sandbox.runner as runner
+
+    calls = {"count": 0}
+
+    def fake_available_backends():
+        calls["count"] += 1
+        return {"apple": False, "docker": False}
+
+    monkeypatch.setattr(runner, "available_backends", fake_available_backends)
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+
+    try:
+        runner.resolve_backend("auto", retries=2)
+    except runner.SandboxExecutionError:
+        pass
+    else:
+        raise AssertionError("Expected SandboxExecutionError")
+
+    assert calls["count"] == 3
