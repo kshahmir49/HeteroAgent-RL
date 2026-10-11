@@ -13,6 +13,12 @@ from heteroagent_rl.benchmarks.evalplus_adapter import load_evalplus_problems
 from heteroagent_rl.benchmarks.splits import SplitConfig, select_split
 from heteroagent_rl.clients.mock import MockLLMClient
 from heteroagent_rl.clients.ollama import OllamaClient
+from heteroagent_rl.rl.checkpoint import (
+    append_jsonl_durable,
+    atomic_write_json,
+    load_jsonl_by_task,
+    prepare_run_directory,
+)
 from heteroagent_rl.rl.controllers import CONTROLLERS, build_controller, run_controller_episode
 from heteroagent_rl.rl.env import CandidateFeedback, HeteroAgentEnv
 from heteroagent_rl.rl.reward import RewardConfig, terminal_reward
@@ -62,6 +68,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--latency-penalty-per-s", type=float, default=0.001)
     parser.add_argument("--tool-call-penalty", type=float, default=0.005)
     parser.add_argument("--tool-latency-penalty-per-s", type=float, default=0.001)
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Discard any checkpoint for this split/controller and restart from task 1.",
+    )
     return parser.parse_args()
 
 
@@ -81,10 +92,66 @@ def build_client(args: argparse.Namespace):
     return OpenAICompatibleClient(api_key=api_key, base_url=base_url)
 
 
-def write_jsonl(path: Path, rows: list[dict]) -> None:
-    with path.open("w", encoding="utf-8") as handle:
+def write_jsonl_atomic(path: Path, rows: list[dict]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, path)
+
+
+def resource_totals(rows: list[dict]) -> dict[str, float | int]:
+    total_tokens = sum(int(row["total_tokens"]) for row in rows)
+    total_latency = sum(float(row["total_latency_s"]) for row in rows)
+    total_calls = sum(int(row["llm_calls"]) for row in rows)
+    total_tool_calls = sum(int(row["tool_calls"]) for row in rows)
+    total_tool_latency = sum(float(row["total_tool_latency_s"]) for row in rows)
+    return {
+        "total_llm_calls": total_calls,
+        "total_tool_calls": total_tool_calls,
+        "total_tokens": total_tokens,
+        "total_latency_s": total_latency,
+        "total_tool_latency_s": total_tool_latency,
+    }
+
+
+def progress_summary(
+    *,
+    args: argparse.Namespace,
+    selected_ids: list[str],
+    rows: list[dict],
+    reward_config: RewardConfig,
+) -> dict:
+    totals = resource_totals(rows)
+    completed = len(rows)
+    return {
+        "status": "in_progress",
+        "benchmark": args.benchmark,
+        "controller": args.controller,
+        "split": args.split,
+        "split_seed": args.split_seed,
+        "num_tasks": len(selected_ids),
+        "completed_tasks": completed,
+        "remaining_tasks": len(selected_ids) - completed,
+        "backend": "mock" if args.mock else args.backend,
+        "planner_model": args.planner_model,
+        "executor_model": args.executor_model,
+        "verifier_model": args.verifier_model,
+        "repair_model": args.repair_model or args.executor_model,
+        **totals,
+        "reward_config": {
+            "success_reward": reward_config.success_reward,
+            "failure_reward": reward_config.failure_reward,
+            "call_penalty": reward_config.call_penalty,
+            "token_penalty_per_1k": reward_config.token_penalty_per_1k,
+            "latency_penalty_per_s": reward_config.latency_penalty_per_s,
+            "tool_call_penalty": reward_config.tool_call_penalty,
+            "tool_latency_penalty_per_s": reward_config.tool_latency_penalty_per_s,
+            "invalid_action_penalty": reward_config.invalid_action_penalty,
+        },
+    }
 
 
 def main() -> None:
@@ -103,15 +170,12 @@ def main() -> None:
     )
     if args.limit is not None:
         selected_ids = selected_ids[: args.limit]
+
     selected_set = set(selected_ids)
     tasks = [task for task in all_tasks if task.task_id in selected_set]
     tasks.sort(key=lambda task: selected_ids.index(task.task_id))
     raw_problems = {task_id: all_problems[task_id] for task_id in selected_ids}
-    client = build_client(args)
-    planner = build_planner(client, args.planner_model)
-    executor = build_executor(client, args.executor_model)
-    verifier = build_verifier(client, args.verifier_model)
-    repairer = build_repairer(client, args.repair_model or args.executor_model)
+
     reward_config = RewardConfig(
         call_penalty=args.call_penalty,
         token_penalty_per_1k=args.token_penalty_per_1k,
@@ -120,14 +184,83 @@ def main() -> None:
         tool_latency_penalty_per_s=args.tool_latency_penalty_per_s,
     )
 
-    rows: list[dict] = []
-    solutions: dict[str, str] = {}
+    run_config = {
+        "benchmark": args.benchmark,
+        "split": args.split,
+        "split_seed": args.split_seed,
+        "selected_ids": selected_ids,
+        "controller": args.controller,
+        "backend": "mock" if args.mock else args.backend,
+        "planner_model": args.planner_model,
+        "executor_model": args.executor_model,
+        "verifier_model": args.verifier_model,
+        "repair_model": args.repair_model or args.executor_model,
+        "num_ctx": args.num_ctx,
+        "sandbox_backend": args.sandbox_backend,
+        "sandbox_timeout": args.sandbox_timeout,
+        "max_steps": args.max_steps,
+        "reward_config": {
+            "success_reward": reward_config.success_reward,
+            "failure_reward": reward_config.failure_reward,
+            "call_penalty": reward_config.call_penalty,
+            "token_penalty_per_1k": reward_config.token_penalty_per_1k,
+            "latency_penalty_per_s": reward_config.latency_penalty_per_s,
+            "tool_call_penalty": reward_config.tool_call_penalty,
+            "tool_latency_penalty_per_s": reward_config.tool_latency_penalty_per_s,
+            "invalid_action_penalty": reward_config.invalid_action_penalty,
+        },
+    }
+
+    output_dir = Path(args.output_dir) / args.benchmark / args.split / args.controller
+    checkpoint_path = prepare_run_directory(
+        output_dir,
+        run_config=run_config,
+        fresh=args.fresh,
+    )
+    summary_path = output_dir / "summary.json"
+    trajectory_path = output_dir / "trajectories.jsonl"
+
+    checkpoint_rows = load_jsonl_by_task(checkpoint_path)
+    unknown_checkpoint_ids = set(checkpoint_rows) - selected_set
+    if unknown_checkpoint_ids:
+        raise RuntimeError(
+            "Checkpoint contains task IDs outside the selected split. "
+            "Use --fresh to reset this run."
+        )
+
+    rows_by_task = {
+        task_id: checkpoint_rows[task_id]
+        for task_id in selected_ids
+        if task_id in checkpoint_rows
+    }
+
+    if rows_by_task:
+        print(
+            f"Resuming {args.controller} on {args.split} with "
+            f"{len(rows_by_task)}/{len(selected_ids)} tasks already checkpointed."
+        )
+
+    client = build_client(args)
+    planner = build_planner(client, args.planner_model)
+    executor = build_executor(client, args.executor_model)
+    verifier = build_verifier(client, args.verifier_model)
+    repairer = build_repairer(client, args.repair_model or args.executor_model)
 
     for index, task in enumerate(tasks, start=1):
+        if task.task_id in rows_by_task:
+            print(f"[{index}/{len(tasks)}] {task.task_id} — checkpointed, skipping")
+            continue
+
         print(f"[{index}/{len(tasks)}] {task.task_id}")
         problem = raw_problems[task.task_id]
 
-        def public_feedback(_task: str, candidate: str, *, _problem=problem, _task_id=task.task_id):
+        def public_feedback(
+            _task: str,
+            candidate: str,
+            *,
+            _problem=problem,
+            _task_id=task.task_id,
+        ):
             _, scored = run_public_examples_sandbox(
                 {_task_id: _problem},
                 {_task_id: candidate},
@@ -156,9 +289,29 @@ def main() -> None:
         episode = run_controller_episode(env, controller, task.prompt)
         episode["task_id"] = task.task_id
         episode["entry_point"] = task.entry_point
-        rows.append(episode)
-        solutions[task.task_id] = str(episode["candidate"])
 
+        append_jsonl_durable(checkpoint_path, episode)
+        rows_by_task[task.task_id] = episode
+
+        completed_rows = [
+            rows_by_task[task_id]
+            for task_id in selected_ids
+            if task_id in rows_by_task
+        ]
+        atomic_write_json(
+            summary_path,
+            progress_summary(
+                args=args,
+                selected_ids=selected_ids,
+                rows=completed_rows,
+                reward_config=reward_config,
+            ),
+        )
+
+    rows = [rows_by_task[task_id] for task_id in selected_ids]
+    solutions = {row["task_id"]: str(row["candidate"]) for row in rows}
+
+    print("All episodes checkpointed. Running terminal EvalPlus scoring.")
     sandbox_backend, scored = run_evalplus_sandbox(
         args.benchmark,
         raw_problems,
@@ -188,22 +341,21 @@ def main() -> None:
         base_pass += int(base_ok)
         plus_pass += int(plus_ok)
 
-    output_dir = Path(args.output_dir) / args.benchmark / args.controller
-    output_dir.mkdir(parents=True, exist_ok=True)
-    trajectory_path = output_dir / "trajectories.jsonl"
-    summary_path = output_dir / "summary.json"
-    write_jsonl(trajectory_path, rows)
+    write_jsonl_atomic(trajectory_path, rows)
 
-    total_tokens = sum(int(row["total_tokens"]) for row in rows)
-    total_latency = sum(float(row["total_latency_s"]) for row in rows)
-    total_calls = sum(int(row["llm_calls"]) for row in rows)
-    total_tool_calls = sum(int(row["tool_calls"]) for row in rows)
-    total_tool_latency = sum(float(row["total_tool_latency_s"]) for row in rows)
+    totals = resource_totals(rows)
+    total_calls = int(totals["total_llm_calls"])
+    total_tool_calls = int(totals["total_tool_calls"])
+    total_tokens = int(totals["total_tokens"])
+    total_latency = float(totals["total_latency_s"])
+    total_tool_latency = float(totals["total_tool_latency_s"])
 
     summary = {
+        "status": "complete",
         "benchmark": args.benchmark,
         "controller": args.controller,
         "num_tasks": len(tasks),
+        "completed_tasks": len(tasks),
         "split": args.split,
         "split_seed": args.split_seed,
         "backend": "mock" if args.mock else args.backend,
@@ -226,20 +378,12 @@ def main() -> None:
         "avg_tool_latency_s": total_tool_latency / len(tasks),
         "total_policy_reward": total_policy_reward,
         "avg_policy_reward": total_policy_reward / len(tasks),
-        "reward_config": {
-            "success_reward": reward_config.success_reward,
-            "failure_reward": reward_config.failure_reward,
-            "call_penalty": reward_config.call_penalty,
-            "token_penalty_per_1k": reward_config.token_penalty_per_1k,
-            "latency_penalty_per_s": reward_config.latency_penalty_per_s,
-            "tool_call_penalty": reward_config.tool_call_penalty,
-            "tool_latency_penalty_per_s": reward_config.tool_latency_penalty_per_s,
-            "invalid_action_penalty": reward_config.invalid_action_penalty,
-        },
+        "reward_config": run_config["reward_config"],
     }
-    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    atomic_write_json(summary_path, summary)
 
     print(json.dumps(summary, indent=2))
+    print(f"Checkpoint written to {checkpoint_path}")
     print(f"Trajectories written to {trajectory_path}")
     print(f"Summary written to {summary_path}")
 

@@ -480,3 +480,42 @@ python -m heteroagent_rl.rl.evaluate_baselines \
 Use `--split train` for controller training and policy development, `--split dev` for model selection and reward tuning, and `--split test` only for final held-out reporting. `--split all` remains available for regression experiments.
 
 The baseline summaries now report tool calls and tool latency in addition to LLM calls, tokens, LLM latency, correctness, and policy reward.
+
+
+## Phase 2C reliability
+
+Long controller evaluations now checkpoint every completed episode before moving to the next task.
+
+A run directory stores
+
+```text
+run_config.json
+episodes.checkpoint.jsonl
+summary.json
+trajectories.jsonl
+```
+
+If a run stops because the sandbox service temporarily becomes unavailable, rerun the same command. Completed task IDs are loaded from the checkpoint and skipped automatically.
+
+The sandbox backend availability check also retries transient failures before aborting.
+
+For example
+
+```bash
+python -m heteroagent_rl.rl.evaluate_baselines \
+  --benchmark humaneval \
+  --split dev \
+  --controller full_pipeline
+```
+
+If it stops after task 10, run the same command again. The evaluator resumes from the first unfinished task.
+
+Use `--fresh` only when you intentionally want to discard the existing checkpoint and restart that split/controller from the beginning.
+
+Split-specific outputs are stored under
+
+```text
+runs/controllers/<benchmark>/<split>/<controller>/
+```
+
+The progress summary is updated after each completed task. Held-out EvalPlus scoring still runs only after every episode has been generated, so interrupted generation does not leak terminal test information into the controller.
