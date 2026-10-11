@@ -7,6 +7,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -46,10 +47,7 @@ def available_backends() -> dict[str, bool]:
     }
 
 
-def resolve_backend(requested: str = "auto") -> str:
-    if requested not in {"auto", "apple", "docker"}:
-        raise ValueError(f"Unknown sandbox backend: {requested}")
-
+def _resolve_backend_once(requested: str) -> str:
     availability = available_backends()
 
     if requested != "auto":
@@ -68,6 +66,31 @@ def resolve_backend(requested: str = "auto") -> str:
         "No supported sandbox is available. Install/start Apple container on "
         "supported macOS or Docker, then rerun the sandbox doctor."
     )
+
+
+def resolve_backend(
+    requested: str = "auto",
+    *,
+    retries: int = 2,
+    retry_delay_s: float = 1.0,
+) -> str:
+    if requested not in {"auto", "apple", "docker"}:
+        raise ValueError(f"Unknown sandbox backend: {requested}")
+    if retries < 0:
+        raise ValueError("retries must be non-negative")
+
+    last_error: SandboxExecutionError | None = None
+    for attempt in range(retries + 1):
+        try:
+            return _resolve_backend_once(requested)
+        except SandboxExecutionError as exc:
+            last_error = exc
+            if attempt >= retries:
+                break
+            time.sleep(retry_delay_s)
+
+    assert last_error is not None
+    raise last_error
 
 
 def _docker_command(input_dir: Path, output_dir: Path, benchmark: str | None, mode: str = "evalplus") -> list[str]:
