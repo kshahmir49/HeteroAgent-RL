@@ -196,6 +196,8 @@ def main() -> None:
         "verifier_model": args.verifier_model,
         "repair_model": args.repair_model or args.executor_model,
         "num_ctx": args.num_ctx,
+        "sandbox_backend": args.sandbox_backend,
+        "sandbox_timeout": args.sandbox_timeout,
         "max_steps": args.max_steps,
         "reward_config": {
             "success_reward": reward_config.success_reward,
