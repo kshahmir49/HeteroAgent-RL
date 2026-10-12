@@ -72,6 +72,7 @@ def test_reset_and_action_mask_require_candidate_for_tools_and_verifier():
 
     assert transition.reward == pytest.approx(-0.01)
     assert transition.observation["has_candidate"]
+    assert not transition.observation["task_has_public_examples"]
     assert env.action_mask() == [1, 1, 0, 1, 0, 1]
 
 
@@ -109,7 +110,15 @@ def test_public_tests_are_explicit_and_unlock_repair():
         )
 
     env = build_env(public_feedback_fn=public_feedback)
-    env.reset("Implement solve.")
+    env.reset(
+        """def solve(x: int) -> int:
+    \"\"\"
+    >>> solve(2)
+    4
+    \"\"\"
+""",
+        entry_point="solve",
+    )
 
     generated = env.step(ControllerAction.CALL_EXECUTOR)
     assert not generated.observation["public_examples_available"]
@@ -173,3 +182,14 @@ def test_verifier_updates_observation_but_not_terminal_truth():
 
     assert stopped.info["terminal_success"] == 0.0
     assert stopped.reward == pytest.approx(0.0)
+
+
+def test_public_test_action_masked_when_task_has_no_examples():
+    env = build_env(
+        public_feedback_fn=lambda task, candidate: CandidateFeedback(status="no_examples")
+    )
+    env.reset("def solve(x: int) -> int:\n    \"\"\"Return x.\"\"\"\n", entry_point="solve")
+    env.step(ControllerAction.CALL_EXECUTOR)
+
+    assert not env.observation()["task_has_public_examples"]
+    assert ControllerAction.RUN_PUBLIC_TESTS not in env.valid_actions()
