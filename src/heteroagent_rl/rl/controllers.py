@@ -49,6 +49,29 @@ class PlannerExecutorController:
         return ControllerAction.STOP
 
 
+
+@dataclass
+class ExecutorPublicRepairController:
+    name: str = "executor_public_repair"
+    _repair_attempted: bool = False
+
+    def reset(self) -> None:
+        self._repair_attempted = False
+
+    def select_action(self, observation, action_mask) -> ControllerAction:
+        if not observation["has_candidate"]:
+            return ControllerAction.CALL_EXECUTOR
+        if (
+            observation["task_has_public_examples"]
+            and not observation["public_examples_available"]
+        ):
+            return ControllerAction.RUN_PUBLIC_TESTS
+        if observation["public_examples_fail"] and not self._repair_attempted:
+            self._repair_attempted = True
+            return ControllerAction.CALL_REPAIR
+        return ControllerAction.STOP
+
+
 @dataclass
 class PublicRepairController:
     name: str = "public_repair"
@@ -101,6 +124,7 @@ class FullPipelineController:
 
 CONTROLLERS = {
     "executor_only": ExecutorOnlyController,
+    "executor_public_repair": ExecutorPublicRepairController,
     "planner_executor": PlannerExecutorController,
     "public_repair": PublicRepairController,
     "full_pipeline": FullPipelineController,

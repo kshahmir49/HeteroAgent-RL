@@ -1,6 +1,7 @@
 from heteroagent_rl.rl.actions import ControllerAction
 from heteroagent_rl.rl.controllers import (
     ExecutorOnlyController,
+    ExecutorPublicRepairController,
     FullPipelineController,
     PlannerExecutorController,
     PublicRepairController,
@@ -20,6 +21,7 @@ __all__ = [
     "CandidateFeedback",
     "ControllerAction",
     "ExecutorOnlyController",
+    "ExecutorPublicRepairController",
     "FullPipelineController",
     "HeteroAgentEnv",
     "PlannerExecutorController",

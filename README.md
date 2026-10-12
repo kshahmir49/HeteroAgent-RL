@@ -547,3 +547,65 @@ The environment also uses the static public-example count in its action mask. `R
 Task features are recorded in each trajectory so learned-controller experiments can be inspected and reproduced.
 
 This remains deliberately lightweight. Phase 2D does not add embeddings or another model call. The first learned policy can therefore test whether inexpensive structural task features are already enough to learn useful routing behavior.
+
+
+## Phase 2E clean routing baselines
+
+HumanEval tasks 0 through 24 are now reserved as legacy development data because they were repeatedly inspected during earlier phases.
+
+The clean HumanEval pool is therefore
+
+```text
+HumanEval/25 through HumanEval/163
+139 tasks total
+```
+
+With the default clean split configuration, that pool is partitioned deterministically into
+
+```text
+train   90 tasks
+dev     24 tasks
+test    25 tasks
+```
+
+The default clean split seed is
+
+```text
+heteroagent-rl-clean-v1
+```
+
+Use `--split legacy_dev` only for regression checks against the previously inspected HumanEval tasks. The clean `train`, `dev`, and `test` splits never contain HumanEval/0 through HumanEval/24.
+
+Phase 2E also adds an executor-first escalation baseline
+
+```text
+executor_public_repair
+```
+
+Its deterministic policy is
+
+```text
+Executor
+  ↓
+public examples, only when prompt-visible examples exist
+  ↓ fail
+one Repairer call
+  ↓
+public examples rerun
+  ↓
+STOP
+```
+
+This baseline deliberately omits the Planner and Verifier. It tests whether direct generation plus evidence-triggered repair can recover failures without paying for the full pipeline.
+
+Run it on the clean development split with
+
+```bash
+python -m heteroagent_rl.rl.evaluate_baselines \
+  --benchmark humaneval \
+  --split dev \
+  --controller executor_public_repair \
+  --fresh
+```
+
+Do not use the clean test split during policy development or reward tuning.
