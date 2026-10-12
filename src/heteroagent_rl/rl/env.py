@@ -15,6 +15,7 @@ from heteroagent_rl.rl.reward import (
     terminal_reward,
     tool_step_cost,
 )
+from heteroagent_rl.rl.task_features import TaskFeatures, extract_task_features
 from heteroagent_rl.schema import StepRecord
 
 
@@ -50,6 +51,7 @@ class RLState:
     done: bool = False
     terminal_success: float | None = None
     history: list[StepRecord] = field(default_factory=list)
+    task_features: TaskFeatures | None = None
 
 
 @dataclass(frozen=True)
@@ -100,8 +102,16 @@ class HeteroAgentEnv:
     def action_size(self) -> int:
         return len(ControllerAction)
 
-    def reset(self, task: str) -> dict[str, float | int | bool]:
-        self.state = RLState(task=task)
+    def reset(
+        self,
+        task: str,
+        *,
+        entry_point: str | None = None,
+    ) -> dict[str, float | int | bool]:
+        self.state = RLState(
+            task=task,
+            task_features=extract_task_features(task, entry_point),
+        )
         return self.observation()
 
     def _require_state(self) -> RLState:
@@ -138,6 +148,7 @@ class HeteroAgentEnv:
     def observation(self) -> dict[str, float | int | bool]:
         state = self._require_state()
         public = state.public_feedback
+        features = state.task_features or extract_task_features(state.task)
         return {
             "has_plan": state.plan is not None,
             "has_candidate": state.candidate is not None,
@@ -156,6 +167,7 @@ class HeteroAgentEnv:
             "total_tool_latency_s": state.total_tool_latency_s,
             "step_count": state.step_count,
             "remaining_steps": max(0, self.max_steps - state.step_count),
+            **features.to_observation(),
         }
 
     def _record_llm_step(self, step: StepRecord) -> float:
