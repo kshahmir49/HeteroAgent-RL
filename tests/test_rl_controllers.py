@@ -1,6 +1,7 @@
 from heteroagent_rl.rl.actions import ControllerAction
 from heteroagent_rl.rl.controllers import (
     ExecutorOnlyController,
+    ExecutorPublicRepairController,
     FullPipelineController,
     PlannerExecutorController,
     PublicRepairController,
@@ -143,3 +144,49 @@ def test_full_pipeline_skips_public_tests_when_task_has_no_examples():
     )
 
     assert action == ControllerAction.CALL_VERIFIER
+
+
+def test_executor_public_repair_uses_no_planner_and_repairs_on_failure():
+    controller = ExecutorPublicRepairController()
+    controller.reset()
+
+    assert controller.select_action(obs(), [1] * 6) == ControllerAction.CALL_EXECUTOR
+    assert controller.select_action(
+        obs(has_candidate=True),
+        [1] * 6,
+    ) == ControllerAction.RUN_PUBLIC_TESTS
+    assert controller.select_action(
+        obs(
+            has_candidate=True,
+            public_examples_available=True,
+            public_examples_fail=True,
+        ),
+        [1] * 6,
+    ) == ControllerAction.CALL_REPAIR
+    assert controller.select_action(
+        obs(has_candidate=True),
+        [1] * 6,
+    ) == ControllerAction.RUN_PUBLIC_TESTS
+    assert controller.select_action(
+        obs(
+            has_candidate=True,
+            public_examples_available=True,
+            public_examples_pass=True,
+        ),
+        [1] * 6,
+    ) == ControllerAction.STOP
+
+
+def test_executor_public_repair_skips_tools_without_public_examples():
+    controller = ExecutorPublicRepairController()
+    controller.reset()
+
+    action = controller.select_action(
+        obs(
+            has_candidate=True,
+            task_has_public_examples=False,
+        ),
+        [1, 1, 0, 1, 0, 1],
+    )
+
+    assert action == ControllerAction.STOP
