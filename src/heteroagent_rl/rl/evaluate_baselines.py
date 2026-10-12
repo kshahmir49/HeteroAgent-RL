@@ -37,8 +37,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--benchmark", choices=["humaneval", "mbpp"], default="humaneval")
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--split", choices=["all", "train", "dev", "test"], default="all")
-    parser.add_argument("--split-seed", default="heteroagent-rl-v1")
+    parser.add_argument("--split", choices=["all", "legacy_dev", "train", "dev", "test"], default="all")
+    parser.add_argument("--split-seed", default="heteroagent-rl-clean-v1")
     parser.add_argument("--controller", choices=sorted(CONTROLLERS), default="full_pipeline")
     parser.add_argument("--output-dir", default="runs/controllers")
     parser.add_argument("--backend", choices=["ollama", "mock", "openai"], default="ollama")
@@ -166,6 +166,7 @@ def main() -> None:
     selected_ids = select_split(
         [task.task_id for task in all_tasks],
         args.split,
+        benchmark=args.benchmark,
         config=split_config,
     )
     if args.limit is not None:
