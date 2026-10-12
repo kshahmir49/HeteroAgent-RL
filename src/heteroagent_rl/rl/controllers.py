@@ -86,7 +86,10 @@ class FullPipelineController:
             return ControllerAction.CALL_PLANNER
         if not observation["has_candidate"]:
             return ControllerAction.CALL_EXECUTOR
-        if not observation["public_examples_available"]:
+        if (
+            observation["task_has_public_examples"]
+            and not observation["public_examples_available"]
+        ):
             return ControllerAction.RUN_PUBLIC_TESTS
         if observation["public_examples_fail"] and not self._repair_attempted:
             self._repair_attempted = True
