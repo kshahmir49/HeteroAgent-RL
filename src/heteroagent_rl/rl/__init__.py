@@ -14,6 +14,7 @@ from heteroagent_rl.rl.env import (
     StepTransition,
 )
 from heteroagent_rl.rl.reward import RewardConfig
+from heteroagent_rl.rl.task_features import TaskFeatures, extract_task_features
 
 __all__ = [
     "CandidateFeedback",
@@ -26,6 +27,8 @@ __all__ = [
     "RLState",
     "RewardConfig",
     "StepTransition",
+    "TaskFeatures",
     "build_controller",
     "run_controller_episode",
+    "extract_task_features",
 ]

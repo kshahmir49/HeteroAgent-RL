@@ -286,7 +286,12 @@ def main() -> None:
             max_steps=args.max_steps,
         )
         controller = build_controller(args.controller)
-        episode = run_controller_episode(env, controller, task.prompt)
+        episode = run_controller_episode(
+            env,
+            controller,
+            task.prompt,
+            entry_point=task.entry_point,
+        )
         episode["task_id"] = task.task_id
         episode["entry_point"] = task.entry_point
 

@@ -519,3 +519,31 @@ runs/controllers/<benchmark>/<split>/<controller>/
 ```
 
 The progress summary is updated after each completed task. Held-out EvalPlus scoring still runs only after every episode has been generated, so interrupted generation does not leak terminal test information into the controller.
+
+
+## Phase 2D task-aware controller state
+
+The RL observation now includes cheap static features extracted from the task before any LLM call.
+
+Examples include
+
+```text
+normalized prompt length
+normalized line and word count
+function count
+helper-function count
+import count
+public-example count
+argument count
+annotation count
+varargs and kwargs flags
+prompt parse status
+```
+
+These features make different coding tasks distinguishable to a learned policy without exposing held-out test results.
+
+The environment also uses the static public-example count in its action mask. `RUN_PUBLIC_TESTS` is unavailable when the benchmark prompt contains no visible examples. The deterministic public-repair and full-pipeline controllers follow the same rule, avoiding sandbox calls that cannot return useful example feedback.
+
+Task features are recorded in each trajectory so learned-controller experiments can be inspected and reproduced.
+
+This remains deliberately lightweight. Phase 2D does not add embeddings or another model call. The first learned policy can therefore test whether inexpensive structural task features are already enough to learn useful routing behavior.

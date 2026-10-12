@@ -26,6 +26,7 @@ def obs(**overrides):
         "total_tool_latency_s": 0.0,
         "step_count": 0,
         "remaining_steps": 10,
+        "task_has_public_examples": True,
     }
     base.update(overrides)
     return base
@@ -110,3 +111,35 @@ def test_full_pipeline_tests_then_verifies():
         ),
         [1] * 6,
     ) == ControllerAction.STOP
+
+
+def test_public_repair_skips_public_tests_when_task_has_no_examples():
+    controller = PublicRepairController()
+    controller.reset()
+
+    action = controller.select_action(
+        obs(
+            has_plan=True,
+            has_candidate=True,
+            task_has_public_examples=False,
+        ),
+        [1, 1, 0, 1, 0, 1],
+    )
+
+    assert action == ControllerAction.STOP
+
+
+def test_full_pipeline_skips_public_tests_when_task_has_no_examples():
+    controller = FullPipelineController()
+    controller.reset()
+
+    action = controller.select_action(
+        obs(
+            has_plan=True,
+            has_candidate=True,
+            task_has_public_examples=False,
+        ),
+        [1, 1, 0, 1, 0, 1],
+    )
+
+    assert action == ControllerAction.CALL_VERIFIER
