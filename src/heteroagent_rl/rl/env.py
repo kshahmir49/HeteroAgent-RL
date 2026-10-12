@@ -131,7 +131,11 @@ class HeteroAgentEnv:
         }
         if state.candidate is not None:
             actions.add(ControllerAction.CALL_VERIFIER)
-            if self.public_feedback_fn is not None:
+            if (
+                self.public_feedback_fn is not None
+                and state.task_features is not None
+                and state.task_features.has_public_examples
+            ):
                 actions.add(ControllerAction.RUN_PUBLIC_TESTS)
         if (
             state.candidate is not None
