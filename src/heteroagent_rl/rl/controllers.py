@@ -155,6 +155,9 @@ def run_controller_episode(
         "public_examples_status": (
             state.public_feedback.status if state.public_feedback is not None else None
         ),
+        "task_features": (
+            state.task_features.to_dict() if state.task_features is not None else {}
+        ),
         "steps": [
             {
                 "reward": transition.reward,
