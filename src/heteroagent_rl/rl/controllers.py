@@ -5,6 +5,7 @@ from typing import Protocol
 
 from heteroagent_rl.rl.actions import ControllerAction
 from heteroagent_rl.rl.env import HeteroAgentEnv, StepTransition
+from heteroagent_rl.rl.router import RouterPolicy
 
 
 class Controller(Protocol):
@@ -20,6 +21,24 @@ class Controller(Protocol):
     ) -> ControllerAction:
         ...
 
+
+
+
+@dataclass
+class LearnedRouterController:
+    policy: RouterPolicy
+    name: str = "learned_router"
+
+    def reset(self) -> None:
+        pass
+
+    def select_action(self, observation, action_mask) -> ControllerAction:
+        if observation["has_candidate"]:
+            return ControllerAction.STOP
+        action = self.policy.predict_action(observation)
+        if not action_mask[int(action)]:
+            raise RuntimeError(f"Router selected masked action {action.name}.")
+        return action
 
 
 @dataclass
@@ -146,11 +165,20 @@ CONTROLLERS = {
 }
 
 
-def build_controller(name: str) -> Controller:
+def build_controller(
+    name: str,
+    *,
+    router_policy_path: str | None = None,
+) -> Controller:
+    if name == "learned_router":
+        if router_policy_path is None:
+            raise ValueError("learned_router requires router_policy_path.")
+        return LearnedRouterController(RouterPolicy.load(router_policy_path))
+
     try:
         return CONTROLLERS[name]()
     except KeyError as exc:
-        choices = ", ".join(sorted(CONTROLLERS))
+        choices = ", ".join(sorted([*CONTROLLERS, "learned_router"]))
         raise ValueError(f"Unknown controller '{name}'. Choose from {choices}.") from exc
 
 
