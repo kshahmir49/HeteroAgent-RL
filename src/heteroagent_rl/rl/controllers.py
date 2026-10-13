@@ -21,6 +21,20 @@ class Controller(Protocol):
         ...
 
 
+
+@dataclass
+class SpecialistOnlyController:
+    name: str = "specialist_only"
+
+    def reset(self) -> None:
+        pass
+
+    def select_action(self, observation, action_mask) -> ControllerAction:
+        if not observation["has_candidate"]:
+            return ControllerAction.CALL_SPECIALIST
+        return ControllerAction.STOP
+
+
 @dataclass
 class ExecutorOnlyController:
     name: str = "executor_only"
@@ -124,6 +138,7 @@ class FullPipelineController:
 
 CONTROLLERS = {
     "executor_only": ExecutorOnlyController,
+    "specialist_only": SpecialistOnlyController,
     "executor_public_repair": ExecutorPublicRepairController,
     "planner_executor": PlannerExecutorController,
     "public_repair": PublicRepairController,
@@ -172,6 +187,7 @@ def run_controller_episode(
         "actions": actions,
         "environment_reward": total_reward,
         "candidate": state.candidate or "",
+        "candidate_source": state.candidate_source,
         "llm_calls": state.llm_calls,
         "tool_calls": state.tool_calls,
         "total_tokens": state.total_tokens,
