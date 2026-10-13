@@ -10,6 +10,7 @@ class ControllerAction(IntEnum):
     CALL_VERIFIER = 3
     CALL_REPAIR = 4
     STOP = 5
+    CALL_SPECIALIST = 6
 
 
 ACTION_NAMES = {action.value: action.name for action in ControllerAction}
