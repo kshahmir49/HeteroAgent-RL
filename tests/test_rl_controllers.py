@@ -1,8 +1,10 @@
 from heteroagent_rl.rl.actions import ControllerAction
+from heteroagent_rl.rl.router import ROUTER_FEATURE_NAMES, RouterPolicy
 from heteroagent_rl.rl.controllers import (
     ExecutorOnlyController,
     ExecutorPublicRepairController,
     FullPipelineController,
+    LearnedRouterController,
     PlannerExecutorController,
     PublicRepairController,
     SpecialistOnlyController,
@@ -209,3 +211,26 @@ def test_specialist_only_calls_specialist_then_stops():
         )
         == ControllerAction.STOP
     )
+
+
+def test_learned_router_selects_policy_action_then_stops():
+    policy = RouterPolicy(
+        feature_names=ROUTER_FEATURE_NAMES,
+        nodes=[{"prediction": 1}],
+        metadata={},
+    )
+    controller = LearnedRouterController(policy)
+    controller.reset()
+
+    initial = obs()
+    for name in ROUTER_FEATURE_NAMES:
+        initial.setdefault(name, 0.0)
+
+    assert (
+        controller.select_action(initial, [1, 1, 0, 0, 0, 1, 1])
+        == ControllerAction.CALL_SPECIALIST
+    )
+
+    completed = dict(initial)
+    completed["has_candidate"] = True
+    assert controller.select_action(completed, [1] * 7) == ControllerAction.STOP
