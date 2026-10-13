@@ -609,3 +609,56 @@ python -m heteroagent_rl.rl.evaluate_baselines \
 ```
 
 Do not use the clean test split during policy development or reward tuning.
+
+
+## Phase 2F heterogeneous specialist executor
+
+Phase 2F adds a second generation model as an explicit orchestration action.
+
+The default cheap Executor remains
+
+```text
+qwen3:4b-instruct
+```
+
+The default coding specialist is
+
+```text
+qwen2.5-coder:7b-instruct
+```
+
+The specialist is intentionally larger and code-focused. On Ollama the 7B Q4 model is about 4.7 GB, which keeps the experiment practical on a 16 GB Apple Silicon Mac while making the model meaningfully different from the default 4B general-purpose Executor.
+
+Install the specialist model once
+
+```bash
+ollama pull qwen2.5-coder:7b-instruct
+```
+
+The RL action space now also includes
+
+```text
+CALL_SPECIALIST
+```
+
+Calling the specialist produces a new standalone candidate. If a cheaper candidate already exists, the specialist receives it only as an optional draft and may replace it completely. Candidate changes clear stale verifier and public-test feedback just like other generation actions.
+
+A new deterministic baseline is available
+
+```text
+specialist_only
+```
+
+Run it on the clean HumanEval development split with
+
+```bash
+python -m heteroagent_rl.rl.evaluate_baselines \
+  --benchmark humaneval \
+  --split dev \
+  --controller specialist_only \
+  --fresh
+```
+
+The evaluator accepts `--specialist-model` if another local coding model should be tested.
+
+The immediate Phase 2F question is not whether the specialist beats the cheap Executor on average. The important question is whether their successes are complementary. If the specialist solves tasks that the cheap Executor misses, the oracle union creates real routing headroom for a learned controller.

@@ -37,6 +37,7 @@ class RLState:
     task: str
     plan: str | None = None
     candidate: str | None = None
+    candidate_source: str | None = None
     verifier_feedback: str | None = None
     verifier_verdict: str = "UNKNOWN"
     public_feedback: CandidateFeedback | None = None
@@ -81,6 +82,7 @@ class HeteroAgentEnv:
         executor: Agent,
         verifier: Agent,
         repairer: Agent,
+        specialist: Agent | None = None,
         public_feedback_fn: FeedbackFn | None = None,
         terminal_score_fn: TerminalScoreFn | None = None,
         reward_config: RewardConfig | None = None,
@@ -92,6 +94,7 @@ class HeteroAgentEnv:
         self.executor = executor
         self.verifier = verifier
         self.repairer = repairer
+        self.specialist = specialist
         self.public_feedback_fn = public_feedback_fn
         self.terminal_score_fn = terminal_score_fn
         self.reward_config = reward_config or RewardConfig()
@@ -129,6 +132,8 @@ class HeteroAgentEnv:
             ControllerAction.CALL_EXECUTOR,
             ControllerAction.STOP,
         }
+        if self.specialist is not None:
+            actions.add(ControllerAction.CALL_SPECIALIST)
         if state.candidate is not None:
             actions.add(ControllerAction.CALL_VERIFIER)
             if (
@@ -156,6 +161,7 @@ class HeteroAgentEnv:
         return {
             "has_plan": state.plan is not None,
             "has_candidate": state.candidate is not None,
+            "candidate_is_specialist": state.candidate_source == "specialist",
             "has_verifier_feedback": state.verifier_feedback is not None,
             "verifier_pass": state.verifier_verdict == "PASS",
             "verifier_revise": state.verifier_verdict == "REVISE",
@@ -187,12 +193,13 @@ class HeteroAgentEnv:
             config=self.reward_config,
         )
 
-    def _inspect_candidate(self, raw_candidate: str) -> None:
+    def _inspect_candidate(self, raw_candidate: str, *, source: str) -> None:
         state = self._require_state()
         mechanical = repair_known_preflight_issues(raw_candidate)
         if mechanical.applied:
             state.mechanical_repairs += 1
         state.candidate = mechanical.repaired_code
+        state.candidate_source = source
         state.preflight_ok = preflight_solution(state.candidate).ok
         state.verifier_feedback = None
         state.verifier_verdict = "UNKNOWN"
@@ -244,6 +251,27 @@ Planner guidance
 {guidance}
 
 Produce the candidate solution."""
+
+    def _specialist_prompt(self) -> str:
+        state = self._require_state()
+        draft = state.candidate
+        if draft is None:
+            draft_section = "No draft candidate is available. Solve the task directly."
+        else:
+            draft_section = f"""Draft candidate
+
+```python
+{draft}
+```
+
+Use the draft only if it is correct and helpful."""
+        return f"""Original task
+
+{state.task}
+
+{draft_section}
+
+Produce the strongest standalone candidate solution."""
 
     def _verifier_prompt(self) -> str:
         state = self._require_state()
@@ -322,7 +350,14 @@ Repair the candidate using only the original task and the public example failure
         elif action == ControllerAction.CALL_EXECUTOR:
             step = self.executor.run(self._executor_prompt())
             reward -= self._record_llm_step(step)
-            self._inspect_candidate(extract_code(step.response))
+            self._inspect_candidate(extract_code(step.response), source="executor")
+
+        elif action == ControllerAction.CALL_SPECIALIST:
+            if self.specialist is None:
+                raise RuntimeError("Specialist executor is not configured.")
+            step = self.specialist.run(self._specialist_prompt())
+            reward -= self._record_llm_step(step)
+            self._inspect_candidate(extract_code(step.response), source="specialist")
 
         elif action == ControllerAction.RUN_PUBLIC_TESTS:
             feedback, cost = self._run_public_tests()
@@ -339,7 +374,7 @@ Repair the candidate using only the original task and the public example failure
         elif action == ControllerAction.CALL_REPAIR:
             step = self.repairer.run(self._repair_prompt())
             reward -= self._record_llm_step(step)
-            self._inspect_candidate(extract_code(step.response))
+            self._inspect_candidate(extract_code(step.response), source="repairer")
 
         state.step_count += 1
         if state.step_count >= self.max_steps:

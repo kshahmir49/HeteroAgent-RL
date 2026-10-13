@@ -5,6 +5,7 @@ from heteroagent_rl.rl.controllers import (
     FullPipelineController,
     PlannerExecutorController,
     PublicRepairController,
+    SpecialistOnlyController,
 )
 
 
@@ -12,6 +13,7 @@ def obs(**overrides):
     base = {
         "has_plan": False,
         "has_candidate": False,
+        "candidate_is_specialist": False,
         "has_verifier_feedback": False,
         "verifier_pass": False,
         "verifier_revise": False,
@@ -190,3 +192,20 @@ def test_executor_public_repair_skips_tools_without_public_examples():
     )
 
     assert action == ControllerAction.STOP
+
+
+def test_specialist_only_calls_specialist_then_stops():
+    controller = SpecialistOnlyController()
+    controller.reset()
+
+    assert (
+        controller.select_action(obs(), [1, 1, 0, 0, 0, 1, 1])
+        == ControllerAction.CALL_SPECIALIST
+    )
+    assert (
+        controller.select_action(
+            obs(has_candidate=True, candidate_is_specialist=True),
+            [1] * 7,
+        )
+        == ControllerAction.STOP
+    )

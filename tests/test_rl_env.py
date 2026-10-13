@@ -30,7 +30,13 @@ class FakeAgent:
         )
 
 
-def build_env(*, public_feedback_fn=None, terminal_score_fn=None, max_steps=10):
+def build_env(
+    *,
+    public_feedback_fn=None,
+    terminal_score_fn=None,
+    max_steps=10,
+    specialist=None,
+):
     return HeteroAgentEnv(
         planner=FakeAgent("planner", ["Use direct arithmetic."]),
         executor=FakeAgent(
@@ -45,6 +51,7 @@ def build_env(*, public_feedback_fn=None, terminal_score_fn=None, max_steps=10):
             "repairer",
             ["def solve(x: int) -> int:\n    return x * 2"],
         ),
+        specialist=specialist,
         public_feedback_fn=public_feedback_fn,
         terminal_score_fn=terminal_score_fn,
         reward_config=RewardConfig(
@@ -66,14 +73,14 @@ def test_reset_and_action_mask_require_candidate_for_tools_and_verifier():
     obs = env.reset("Implement solve.")
 
     assert not obs["has_candidate"]
-    assert env.action_mask() == [1, 1, 0, 0, 0, 1]
+    assert env.action_mask() == [1, 1, 0, 0, 0, 1, 0]
 
     transition = env.step(ControllerAction.CALL_EXECUTOR)
 
     assert transition.reward == pytest.approx(-0.01)
     assert transition.observation["has_candidate"]
     assert not transition.observation["task_has_public_examples"]
-    assert env.action_mask() == [1, 1, 0, 1, 0, 1]
+    assert env.action_mask() == [1, 1, 0, 1, 0, 1, 0]
 
 
 def test_terminal_scorer_runs_only_on_stop():
@@ -193,3 +200,33 @@ def test_public_test_action_masked_when_task_has_no_examples():
 
     assert not env.observation()["task_has_public_examples"]
     assert ControllerAction.RUN_PUBLIC_TESTS not in env.valid_actions()
+
+
+def test_specialist_is_explicit_action_and_marks_candidate_source():
+    specialist = FakeAgent(
+        "specialist",
+        ["def solve(x: int) -> int:\n    return x * 3"],
+    )
+    env = build_env(specialist=specialist)
+    initial = env.reset("def solve(x: int) -> int:\n    return x\n", entry_point="solve")
+
+    assert not initial["candidate_is_specialist"]
+    assert ControllerAction.CALL_SPECIALIST in env.valid_actions()
+
+    transition = env.step(ControllerAction.CALL_SPECIALIST)
+
+    assert transition.observation["has_candidate"]
+    assert transition.observation["candidate_is_specialist"]
+    assert env.state is not None
+    assert env.state.candidate_source == "specialist"
+    assert env.state.llm_calls == 1
+
+
+def test_specialist_action_is_invalid_when_not_configured():
+    env = build_env()
+    env.reset("Implement solve.")
+
+    transition = env.step(ControllerAction.CALL_SPECIALIST)
+
+    assert transition.info["invalid_action"] is True
+    assert transition.reward == pytest.approx(-0.05)

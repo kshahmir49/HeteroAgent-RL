@@ -5,6 +5,7 @@ from heteroagent_rl.rl.controllers import (
     FullPipelineController,
     PlannerExecutorController,
     PublicRepairController,
+    SpecialistOnlyController,
     build_controller,
     run_controller_episode,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "HeteroAgentEnv",
     "PlannerExecutorController",
     "PublicRepairController",
+    "SpecialistOnlyController",
     "RLState",
     "RewardConfig",
     "StepTransition",
