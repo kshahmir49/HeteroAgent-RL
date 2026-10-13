@@ -13,12 +13,20 @@ dependencies = []
 openai = [
   "openai>=1.40.0",
 ]
+bench = [
+  "evalplus>=0.3.1",
+]
 dev = [
   "pytest>=8.0",
 ]
+router = [
+  "scikit-learn>=1.5",
+]
 all = [
+  "evalplus>=0.3.1",
   "openai>=1.40.0",
   "pytest>=8.0",
+  "scikit-learn>=1.5",
 ]
 
 [tool.setuptools.packages.find]

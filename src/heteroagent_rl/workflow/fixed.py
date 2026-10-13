@@ -19,7 +19,7 @@ class FixedWorkflow:
 
 {task}
 
-Produce a plan for the Executor."""
+Produce a concise plan for the Executor."""
         plan = self.planner.run(planner_prompt)
         steps.append(plan)
 
@@ -27,7 +27,7 @@ Produce a plan for the Executor."""
 
 {task}
 
-Planner output
+Planner guidance
 
 {plan.response}
 
@@ -35,19 +35,17 @@ Produce the candidate solution."""
         candidate = self.executor.run(executor_prompt)
         steps.append(candidate)
 
+        # The verifier intentionally does not receive the planner output.
+        # This reduces duplicated context and makes verification more independent.
         verifier_prompt = f"""Original task
 
 {task}
-
-Planner output
-
-{plan.response}
 
 Candidate solution
 
 {candidate.response}
 
-Verify the candidate."""
+Verify the candidate independently."""
         verification = self.verifier.run(verifier_prompt)
         steps.append(verification)
 
