@@ -22,6 +22,7 @@ from heteroagent_rl.rl.checkpoint import (
 from heteroagent_rl.rl.controllers import CONTROLLERS, build_controller, run_controller_episode
 from heteroagent_rl.rl.env import CandidateFeedback, HeteroAgentEnv
 from heteroagent_rl.rl.reward import RewardConfig, terminal_reward
+from heteroagent_rl.rl.router import policy_sha256
 from heteroagent_rl.sandbox.runner import (
     run_evalplus_sandbox,
     run_public_examples_sandbox,
@@ -40,7 +41,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--split", choices=["all", "legacy_dev", "train", "dev", "test"], default="all")
     parser.add_argument("--split-seed", default="heteroagent-rl-clean-v1")
-    parser.add_argument("--controller", choices=sorted(CONTROLLERS), default="full_pipeline")
+    parser.add_argument(
+        "--controller",
+        choices=sorted([*CONTROLLERS, "learned_router"]),
+        default="full_pipeline",
+    )
     parser.add_argument("--output-dir", default="runs/controllers")
     parser.add_argument("--backend", choices=["ollama", "mock", "openai"], default="ollama")
     parser.add_argument("--mock", action="store_true")
@@ -49,6 +54,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--specialist-model", default=DEFAULT_SPECIALIST_MODEL)
     parser.add_argument("--verifier-model", default=DEFAULT_LOCAL_MODEL)
     parser.add_argument("--repair-model", default=None)
+    parser.add_argument(
+        "--router-policy",
+        default="runs/router/humaneval/contextual_tree.json",
+        help="Serialized contextual router policy used by --controller learned_router.",
+    )
     parser.add_argument(
         "--ollama-url",
         default=os.environ.get("HETEROAGENT_OLLAMA_URL", "http://localhost:11434"),
@@ -188,6 +198,15 @@ def main() -> None:
         tool_latency_penalty_per_s=args.tool_latency_penalty_per_s,
     )
 
+    router_policy_hash = None
+    if args.controller == "learned_router":
+        policy_path = Path(args.router_policy)
+        if not policy_path.exists():
+            raise SystemExit(
+                f"Router policy not found at {policy_path}. Train it before evaluation."
+            )
+        router_policy_hash = policy_sha256(policy_path)
+
     run_config = {
         "benchmark": args.benchmark,
         "split": args.split,
@@ -200,6 +219,8 @@ def main() -> None:
         "specialist_model": args.specialist_model,
         "verifier_model": args.verifier_model,
         "repair_model": args.repair_model or args.executor_model,
+        "router_policy": args.router_policy if args.controller == "learned_router" else None,
+        "router_policy_sha256": router_policy_hash,
         "num_ctx": args.num_ctx,
         "sandbox_backend": args.sandbox_backend,
         "sandbox_timeout": args.sandbox_timeout,
@@ -292,7 +313,12 @@ def main() -> None:
             reward_config=reward_config,
             max_steps=args.max_steps,
         )
-        controller = build_controller(args.controller)
+        controller = build_controller(
+            args.controller,
+            router_policy_path=(
+                args.router_policy if args.controller == "learned_router" else None
+            ),
+        )
         episode = run_controller_episode(
             env,
             controller,
@@ -376,6 +402,8 @@ def main() -> None:
         "specialist_model": args.specialist_model,
         "verifier_model": args.verifier_model,
         "repair_model": args.repair_model or args.executor_model,
+        "router_policy": args.router_policy if args.controller == "learned_router" else None,
+        "router_policy_sha256": router_policy_hash,
         "sandbox_backend": sandbox_backend,
         "base_pass_rate": base_pass / len(tasks),
         "plus_pass_rate": plus_pass / len(tasks),
