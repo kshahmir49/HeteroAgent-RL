@@ -1,0 +1,49 @@
+{
+  "project": "HeteroAgent-RL",
+  "benchmark": "humaneval",
+  "benchmark_variant": "EvalPlus",
+  "split_seed": "heteroagent-rl-clean-v1",
+  "frozen_router_policy_sha256": "01428874602c7f5f02dd8cd59300b5d774b3452f0d225aa806a2f9591af9bb65",
+  "models": {
+    "executor": "qwen3:4b-instruct",
+    "specialist": "qwen2.5-coder:7b-instruct"
+  },
+  "final_test": {
+    "num_tasks": 25,
+    "executor_only": {
+      "base_pass_rate": 0.84,
+      "strict_pass_rate": 0.76,
+      "total_tokens": 12790,
+      "total_latency_s": 123.89090462401509,
+      "avg_policy_reward": 0.7445327638150393
+    },
+    "specialist_only": {
+      "base_pass_rate": 0.92,
+      "strict_pass_rate": 0.92,
+      "total_tokens": 11156,
+      "total_latency_s": 135.90411129314452,
+      "avg_policy_reward": 0.9041175955482744
+    },
+    "learned_router": {
+      "base_pass_rate": 0.92,
+      "strict_pass_rate": 0.92,
+      "total_tokens": 11850,
+      "total_latency_s": 161.0609881291166,
+      "avg_policy_reward": 0.9030835604748353
+    },
+    "oracle_strict_pass_rate": 0.96
+  },
+  "dev": {
+    "num_tasks": 24,
+    "executor_only_strict_pass_rate": 0.8333333333333334,
+    "specialist_only_strict_pass_rate": 0.9166666666666666,
+    "learned_router_strict_pass_rate": 0.9583333333333334,
+    "oracle_strict_pass_rate": 0.9583333333333334
+  },
+  "train": {
+    "num_tasks": 90,
+    "executor_only_strict_pass_rate": 0.7888888888888889,
+    "specialist_only_strict_pass_rate": 0.8,
+    "oracle_strict_pass_rate": 0.8888888888888888
+  }
+}
