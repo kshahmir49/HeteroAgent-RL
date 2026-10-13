@@ -662,3 +662,68 @@ python -m heteroagent_rl.rl.evaluate_baselines \
 The evaluator accepts `--specialist-model` if another local coding model should be tested.
 
 The immediate Phase 2F question is not whether the specialist beats the cheap Executor on average. The important question is whether their successes are complementary. If the specialist solves tasks that the cheap Executor misses, the oracle union creates real routing headroom for a learned controller.
+
+
+## Phase 2G contextual learned router
+
+Phase 2G turns the measured Executor-versus-Specialist complementarity into a learned routing policy.
+
+The router uses only the static task features extracted before any LLM call. It does not see held-out EvalPlus results, generated candidates, verifier feedback, or public-test feedback.
+
+Training data is built by pairing the cached clean training trajectories from
+
+```text
+executor_only
+specialist_only
+```
+
+For each task, the preferred action is the model with the higher recorded policy reward. This means correctness dominates the label, while token and latency costs break ties when both models have the same correctness outcome.
+
+The first learned policy is deliberately small and inspectable. It is a shallow decision tree trained with training-only cross-validation over a fixed grid of tree depth and minimum leaf size. Cross-validation selects the configuration with the highest mean routed policy reward, then strict correctness is used as the next tie breaker.
+
+Install the router training dependency
+
+```bash
+pip install -e ".[bench,dev,router]"
+```
+
+Train the router from the cached clean 90-task training trajectories
+
+```bash
+python -m heteroagent_rl.rl.train_router
+```
+
+The default output is
+
+```text
+runs/router/humaneval/contextual_tree.json
+```
+
+The serialized policy contains only the feature schema, compact decision-tree nodes, and training metadata. Inference does not require scikit-learn.
+
+Before making new model calls, score the frozen router against the already cached 24-task clean development trajectories
+
+```bash
+python -m heteroagent_rl.rl.score_router
+```
+
+This produces
+
+```text
+runs/router/humaneval/dev_score.json
+```
+
+For an end-to-end run through the real RL environment, use
+
+```bash
+python -m heteroagent_rl.rl.evaluate_baselines \
+  --benchmark humaneval \
+  --split dev \
+  --controller learned_router \
+  --router-policy runs/router/humaneval/contextual_tree.json \
+  --fresh
+```
+
+The evaluator records the router policy path and SHA-256 hash so a reported run can be tied to the exact frozen policy.
+
+The clean test split remains untouched during Phase 2G. The project moves to final test evaluation only after the router design and training procedure are frozen.
