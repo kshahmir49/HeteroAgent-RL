@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 
-from heteroagent_rl.agents.executor import build_executor
+from heteroagent_rl.agents.executor import build_executor, build_specialist
 from heteroagent_rl.agents.planner import build_planner
 from heteroagent_rl.agents.repairer import build_repairer
 from heteroagent_rl.agents.verifier import build_verifier
@@ -29,6 +29,7 @@ from heteroagent_rl.sandbox.runner import (
 
 
 DEFAULT_LOCAL_MODEL = "qwen3:4b-instruct"
+DEFAULT_SPECIALIST_MODEL = "qwen2.5-coder:7b-instruct"
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,6 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mock", action="store_true")
     parser.add_argument("--planner-model", default=DEFAULT_LOCAL_MODEL)
     parser.add_argument("--executor-model", default=DEFAULT_LOCAL_MODEL)
+    parser.add_argument("--specialist-model", default=DEFAULT_SPECIALIST_MODEL)
     parser.add_argument("--verifier-model", default=DEFAULT_LOCAL_MODEL)
     parser.add_argument("--repair-model", default=None)
     parser.add_argument(
@@ -138,6 +140,8 @@ def progress_summary(
         "backend": "mock" if args.mock else args.backend,
         "planner_model": args.planner_model,
         "executor_model": args.executor_model,
+        "specialist_model": args.specialist_model,
+        "specialist_model": args.specialist_model,
         "verifier_model": args.verifier_model,
         "repair_model": args.repair_model or args.executor_model,
         **totals,
@@ -194,6 +198,7 @@ def main() -> None:
         "backend": "mock" if args.mock else args.backend,
         "planner_model": args.planner_model,
         "executor_model": args.executor_model,
+        "specialist_model": args.specialist_model,
         "verifier_model": args.verifier_model,
         "repair_model": args.repair_model or args.executor_model,
         "num_ctx": args.num_ctx,
@@ -244,6 +249,7 @@ def main() -> None:
     client = build_client(args)
     planner = build_planner(client, args.planner_model)
     executor = build_executor(client, args.executor_model)
+    specialist = build_specialist(client, args.specialist_model)
     verifier = build_verifier(client, args.verifier_model)
     repairer = build_repairer(client, args.repair_model or args.executor_model)
 
@@ -281,6 +287,7 @@ def main() -> None:
             executor=executor,
             verifier=verifier,
             repairer=repairer,
+            specialist=specialist,
             public_feedback_fn=public_feedback,
             terminal_score_fn=None,
             reward_config=reward_config,
