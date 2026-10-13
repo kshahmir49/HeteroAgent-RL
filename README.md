@@ -1,10 +1,49 @@
 # HeteroAgent-RL
 
-HeteroAgent-RL is a practical local-LLM routing project that asks a simple systems question
+**Learning which LLM should handle a task instead of treating every request the same way**
 
-> Can a learned controller choose between heterogeneous language models well enough to improve coding reliability without calling every model on every task?
+Modern AI systems increasingly have access to multiple language models. Some models are small and general-purpose, while others are larger or specialized for tasks such as coding. A common approach is to always use the strongest model or to run several agents for every request.
 
-The final system uses a small task-aware router to choose between a general-purpose local model and a coding specialist before generation begins. The project includes sandboxed execution, clean benchmark splits, deterministic baselines, cost tracking, cached trajectory analysis, and a frozen final evaluation.
+Both approaches can be inefficient.
+
+A simple task may not need a specialized model, while a harder programming problem may benefit significantly from one. Calling planners, verifiers, repair agents, or multiple models for every request also increases latency and resource use.
+
+**HeteroAgent-RL explores whether an AI system can learn to choose the right local LLM for each task before generation begins.**
+
+The final system extracts inexpensive characteristics from a programming problem and uses a lightweight learned router to choose between a general-purpose model and a coding specialist.
+
+```text
+Programming task
+        ↓
+Static task features
+        ↓
+Learned router
+      ↙       ↘
+ General     Coding
+ Executor   Specialist
+      ↘       ↙
+       Solution
+```
+
+The goal is not to build another large multi-agent framework. The goal is to study **adaptive inference** — using different models where they are most useful instead of applying the same model or workflow to every request.
+
+## Why this matters
+
+Real AI systems often operate with models that differ in capability, specialization, memory requirements, latency, and inference cost.
+
+A routing layer can decide which model should handle a request before paying the cost of generation. This idea can be useful in coding assistants, local and edge AI systems, enterprise inference gateways, agent systems with specialized workers, and cost-aware AI services that need to balance quality against compute.
+
+HeteroAgent-RL focuses on programming tasks because they provide objective executable evaluation, but the routing problem is broader. The same design idea could apply to systems choosing among general models, reasoning models, domain specialists, multimodal models, or models deployed on different hardware.
+
+## What this project investigates
+
+HeteroAgent-RL asks one concrete question
+
+> **Can we predict which local LLM is most suitable for a programming task before running it?**
+
+The project compares a general-purpose local LLM with a coding-specialized LLM, measures where their capabilities overlap and differ, and trains a lightweight contextual router using task-level features available before inference.
+
+The final result is not that routing always beats the strongest model. Instead, the experiments show that the models have complementary strengths, that routing decisions can be learned from task features, and that a learned router can recover most of the available two-model oracle performance without running both models for every task.
 
 ## Final result
 
@@ -17,9 +56,9 @@ On the untouched 25-task HumanEval+ test split, the learned router reached the s
 | Learned router | 92% | 92% | 11,850 | 161.1 s | 0.9031 |
 | Two-model oracle | — | 96% | — | — | — |
 
-The two underlying models were genuinely complementary on the final test set. Eighteen tasks were solved by both models, five only by the Specialist, one only by the Executor, and one by neither. The learned router made the correct choice on all but one routable task.
+The two underlying models were complementary on the final test set. Eighteen tasks were solved by both models, five only by the Specialist, one only by the Executor, and one by neither. The learned router made the correct model choice on all but one routable task.
 
-The router did not beat the Specialist on the final test set. It tied the Specialist at 92% strict correctness while using slightly more tokens and latency. That result is reported as-is rather than tuned away.
+The router did not beat the Specialist on the final test set. It tied the Specialist at 92% strict correctness while using slightly more tokens and latency. That result is reported as observed rather than tuned away.
 
 ## Final architecture
 
@@ -37,15 +76,13 @@ flowchart LR
 
 The router sees only inexpensive prompt-derived features available before inference. It never sees held-out EvalPlus results when choosing a model.
 
-## Why the project changed direction
+## Design rationale
 
-The project started as a conventional multi-agent pipeline with Planner, Executor, Verifier, and Repairer roles. Controlled evaluations showed that adding more agents often increased cost without improving correctness.
+Early baselines compared larger multi-agent workflows with simpler direct-generation systems. Extra Planner, Verifier, and Repairer calls did not consistently improve correctness enough to justify their added cost.
 
-That negative result changed the design.
+The final design therefore focuses on heterogeneous model routing. A small controller chooses between two models with different strengths before generation, which keeps the deployed workflow simple while still exploiting model specialization.
 
-The next experiments tested direct generation, public-example repair, task-aware observations, and finally heterogeneous model choice. The general Executor and coding Specialist showed complementary error patterns on clean data, creating measurable routing headroom. That made learned routing a justified next step rather than adding reinforcement learning only because it was part of the original plan.
-
-The final controller is intentionally simple. A shallow decision tree is trained from paired model trajectories using static task features. Training uses policy reward so correctness dominates while token and latency costs can break ties.
+The final controller is intentionally lightweight. A shallow decision tree is trained from paired model trajectories using static task features. Training uses policy reward so correctness dominates while token and latency costs can break ties.
 
 ## Models
 
